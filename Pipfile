@@ -4,12 +4,13 @@ verify_ssl = true
 name = "pypi"
 
 [packages]
-jupyterlab = "*"
 pgmpy = "*"
 pyparsing = "*"
-pygraphviz = "*"
+numpy = "*"
 
 [dev-packages]
+jupyterlab = "*"
+pygraphviz = "*"
 
 [requires]
 python_version = "3.12"
