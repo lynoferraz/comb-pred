@@ -10,9 +10,11 @@ from pgmpy.models import JunctionTree
 logger = logging.getLogger(__name__)
 
 def factor_with_vars(vars, j):
+    possible_fs = []
     for f in j.get_factors():
         if len(set(vars) & set(f.variables)) == len(vars):
-            return f
+            possible_fs.append(f)
+    if len(possible_fs) > 0: return min(possible_fs,key=lambda c:len(c.variables))
     return None
 
 def factor_with_most_vars(vars, j):
@@ -33,13 +35,14 @@ def revert_fund(q, b):
 
 dummy_prefix = "_x"
 is_dummy_var = lambda v: v.startswith(f"{dummy_prefix}")
-get_factor_dummies = lambda f: [v for v in f.variables if is_dummy_var(v)]
+get_dummies = lambda variables: [v for v in variables if is_dummy_var(v)]
 dummy_name = lambda idx: f"{dummy_prefix}{idx}"
-create_dummy_factor = lambda n: DiscreteFactor([n], [1], [1])
+create_dummy_factor = lambda n: create_factor(n,1)
+create_factor = lambda n,s: DiscreteFactor([n], [s], [1]*s)
 
 get_prob_fn = lambda bfp, r: bfp.query(variables=list(r['variables'].keys()), evidence=r.get('evidence'))
 
-
+clique_tup = lambda c: tuple(sorted(c))
 
 # State enumeration
 def enumerate_states(report, factor):
@@ -118,12 +121,13 @@ def get_resolve_instructions(jt, resolve):
     leaf_cliques = []
     dummy_resolutions = []
     map_clique_resolve = {}
+    dummy_used_times = {}
     for fn in jt.get_factors():
         new_c = set(fn.variables)
-        original_clique = tuple(sorted(new_c))
+        original_clique = clique_tup(new_c)
         # print(f"factor {original_clique}")
         resolve_list = [resolve] if resolve[0] in new_c else []
-        for d in get_factor_dummies(fn): resolve_list.append((d,0))
+        for d in get_dummies(fn.variables): resolve_list.append((d,0))
         map_clique_resolve[original_clique] = resolve_list
         resolve_vars = {t[0] for t in resolve_list}
         # print(f"  resolving over vars {resolve_vars}")
@@ -132,39 +136,88 @@ def get_resolve_instructions(jt, resolve):
         new_c = new_c | set((dummies_to_add.get(original_clique,{})).values())
         neighbors = list(jt.neighbors(original_clique))
         if len(new_c) == 0 and len(neighbors) == 1: # leaf
-            # print(f"  skipping leaf clique {fu.values=}")
+            # print(f"  skipping leaf clique")
             leaf_cliques.append(original_clique)
             continue
+        only_dummies = all(is_dummy_var(v) for v in new_c)
         # print(f"  new edges {new_c}")
         for no in neighbors:
-            new_n = set(no) - resolve_vars
-            original_n = tuple(sorted(no))
-            # print(f"    connecting to {original_n}")
+            new_n = set(no) - resolve_vars - {resolve[0]}- set(get_dummies(no))
+            original_n = clique_tup(no)
+            # print(f"    connecting to {original_n} ({new_n})")
             if original_n in cliques_connected: continue
+
             if original_n in leaf_cliques:
                 # print(f"    skipping leaf neighbor")
+                continue
+            if len(new_n) == 0 and len(list(jt.neighbors(no))):
+                # print(f"    skipping leaf neighbor (tbd)")
                 continue
             if len(new_n & new_c) == 0 and \
                     (dummies_to_add.get(original_clique) is None or \
                         dummies_to_add[original_clique].get(no) is None):
-                # print(f"    creating dummy")
-                d_clique = dummy_name(cur_dummies)
-                cur_dummies += 1
-                dummies_to_add.setdefault(no,{})[original_clique] = d_clique
-                new_c.add(d_clique)
+                added_dummy = False
+                if only_dummies:
+                    for d_var in new_c:
+                        if dummy_used_times.get(d_var,0) < 3:
+                            dummies_to_add.setdefault(no,{})[original_clique] = d_var
+                            added_dummy = True
+                            # print(f"    using dummy {d_var} on {no}")
+                            break
+                if not added_dummy:
+                    # print(f"    creating dummy")
+                    d_var = dummy_name(cur_dummies)
+                    cur_dummies += 1
+                    dummies_to_add.setdefault(no,{})[original_clique] = d_var
+                    new_c.add(d_var)
+                    dummy_used_times[d_var] = 2
             cliques_connected.append(original_n)
-        tnew_c = tuple(sorted(new_c))
+        tnew_c = clique_tup(new_c)
         old_to_new_cliques[original_clique] = tnew_c
         if tnew_c in new_cliques: continue
-        only_dummies = all(is_dummy_var(v) for v in new_c)
         if only_dummies:
             dummy_cliques.append(original_clique)
             continue
         new_cliques.append(tnew_c)
     # map dummy clique to one of its neighbors
     for c in dummy_cliques:
-        nc = next(jt.neighbors(c))
-        old_to_new_cliques[c] = old_to_new_cliques[nc]
+        # print(f"dummy clique {old_to_new_cliques[c]} ({c})")
+        tg_c = None
+        for nc in jt.neighbors(c):
+            # print(f"  evaluating {nc})")
+            if tg_c is None:
+                if old_to_new_cliques.get(nc) is not None:
+                    tg_c = nc
+                    # print(f"  will point to neighbor {old_to_new_cliques[nc]}")
+                continue
+            new_n = set(old_to_new_cliques[nc])
+            new_tg = set(old_to_new_cliques[tg_c])
+            if len(new_n & new_tg) == 0:
+                d_var = None
+                for d in get_dummies(new_tg):
+                    if dummy_used_times.get(d,0) < 3:
+                        d_var = d
+                        dummy_used_times[d] += 1
+                        new_n.add(d_var)
+                        break
+                if d_var is None:
+                    for d in get_dummies(new_n):
+                        if dummy_used_times.get(d,0) < 3:
+                            d_var = d
+                            dummy_used_times[d] += 1
+                            new_tg.add(d_var)
+                            break
+                if d_var is None:
+                    # print(f"  creating dummy between ({new_tg}) ({new_n})")
+                    d_var = dummy_name(cur_dummies)
+                    dummy_used_times[d_var] = 2
+                    cur_dummies += 1
+                    new_n.add(d_var)
+                    new_tg.add(d_var)
+                old_to_new_cliques[tg_c] = clique_tup(new_tg)
+                old_to_new_cliques[nc] = clique_tup(new_n)
+        if tg_c is not None:
+            old_to_new_cliques[c] = old_to_new_cliques[tg_c]
     # print(f"edges")
     new_edges = []
     for c in old_to_new_cliques.keys():
@@ -175,44 +228,268 @@ def get_resolve_instructions(jt, resolve):
             if (new_c,new_n) in new_edges or (new_n,new_c) in new_edges: continue
             new_edges.append((new_c,new_n))
             # print(f"    {(new_c,new_n)}")
+    for c in dummy_cliques:
+        # print(f"deleting dummy {c} {old_to_new_cliques[c]}")
+        del old_to_new_cliques[c]
+    if len(dummy_cliques) == 1 and len(old_to_new_cliques) == 0:
+        d_var = dummy_name(cur_dummies)
+        cur_dummies += 1
+        old_to_new_cliques[c] = clique_tup({d_var})
+        # print(f"create placeholder dummy node {c} {old_to_new_cliques[c]}")
     return map_clique_resolve, new_edges, old_to_new_cliques
 
-def resolve_jt(jt, map_clique_resolve, new_edges, old_to_new_cliques, \
-        scale_by_local_min = False, scale_by_global_min = False):
-    new_cliques = set(old_to_new_cliques.values())
-    new_factors = []
-    min_value = None
+def get_add_variable_instructions(jt, new_var, new_var_states, cliques_to_add):
+    # can add to new facto
+    if len(cliques_to_add) < 1 or len(cliques_to_add) > 3:
+        raise Exception(f"Can't add variable with {len(cliques_to_add)} cliques")
 
     for f in jt.get_factors():
-        original_clique = tuple(sorted(f.variables))
-        print(f"\nfactor {original_clique}")
+        if new_var in f.variables:
+            raise Exception(f"Can't add existing variable")
+
+    new_edges = []
+    old_to_new_cliques = {}
+    map_clique_add = {}
+    cur_dummies = 0
+    dummies_to_add = {}
+    existing_cliques_to_add = []
+    create_new_clique = False
+    clique_to_connect_new_clique = None
+    for co in cliques_to_add:
+        # print(f"Trying to add new var to clique with {co}")
+        if co is None:
+            # new clique with var
+            create_new_clique = True
+            continue
+        f = factor_with_vars(co,jt)
+        c = clique_tup(f.variables)
+        if f is None:
+            raise Exception(f"Clique {c} does not exist in Junction Tree")
+        existing_cliques_to_add.append(c)
+        # print(f"Adding new var to clique {c}")
+    if create_new_clique:
+        if len(existing_cliques_to_add) > 0:
+            clique_to_connect_new_clique = min(existing_cliques_to_add,key=lambda c:len(c))
+        else:
+            cliques = [clique_tup(f.variables) for f in jt.get_factors()]
+            clique_to_connect_new_clique = min(cliques,key=lambda c:len(c))
+        # print(f"Will connect new clique to {clique_to_connect_new_clique}")
+    if len(existing_cliques_to_add) > 1:
+        for c in existing_cliques_to_add:
+            has_neighbor = False
+            for n in jt.neighbors(c):
+                no = clique_tup(n)
+                if no in existing_cliques_to_add:
+                    has_neighbor = True
+                    break
+            if not has_neighbor:
+                raise Exception(f"Clique {c} has no connection to other requested cliques")
+
+    # resolve dommies and add if necessary
+    cliques_connected = []
+    new_cliques = []
+    dummy_cliques = []
+    leaf_cliques = []
+    dummy_resolutions = []
+    map_clique_resolve = {}
+    dummy_used_times = {}
+    for fn in jt.get_factors():
+        new_c = set(fn.variables)
+        original_clique = clique_tup(new_c)
+        # print(f"factor {original_clique}")
+        resolve_list = []
+        for d in get_dummies(fn.variables): resolve_list.append((d,0))
+        map_clique_resolve[original_clique] = resolve_list
+        resolve_vars = {t[0] for t in resolve_list}
+        # print(f"  resolving over vars {resolve_vars}")
+        new_c = new_c - resolve_vars
+        cliques_connected.append(original_clique)
+        new_c = new_c | set((dummies_to_add.get(original_clique,{})).values())
+        if original_clique in existing_cliques_to_add:
+            # add variable to clique
+            # print(f"  add new var {new_var}")
+            map_clique_add.setdefault(original_clique,{})[new_var] = new_var_states
+            new_c.add(new_var)
+        neighbors = list(jt.neighbors(original_clique))
+        if len(new_c) == 0 and len(neighbors) == 1: # leaf
+            # print(f"  skipping leaf clique {fu.values=}")
+            leaf_cliques.append(original_clique)
+            continue
+        only_dummies = all(is_dummy_var(v) for v in new_c)
+        # print(f"  new edges {new_c}")
+        for no in neighbors:
+            new_n = set(no) - resolve_vars - set(get_dummies(no))
+            if clique_tup(no) in existing_cliques_to_add:
+                new_n.add(new_var)
+            original_n = clique_tup(no)
+            # print(f"    connecting to {original_n}")
+            if original_n in cliques_connected: continue
+            if original_n in leaf_cliques:
+                # print(f"    skipping leaf neighbor")
+                continue
+            if len(new_n) == 0 and len(list(jt.neighbors(no))):
+                # print(f"    skipping leaf neighbor (tbd)")
+                continue
+            if len(new_n & new_c) == 0 and \
+                    (dummies_to_add.get(original_clique) is None or \
+                        dummies_to_add[original_clique].get(no) is None):
+                added_dummy = False
+                if only_dummies:
+                    for d_var in new_c:
+                        if dummy_used_times.get(d_var,0) < 3:
+                            dummies_to_add.setdefault(no,{})[original_clique] = d_var
+                            added_dummy = True
+                            # print(f"    using dummy {d_var} on {no}")
+                            break
+                if not added_dummy:
+                    # print(f"    creating dummy")
+                    d_var = dummy_name(cur_dummies)
+                    cur_dummies += 1
+                    dummies_to_add.setdefault(no,{})[original_clique] = d_var
+                    new_c.add(d_var)
+                    dummy_used_times[d_var] = 2
+            cliques_connected.append(original_n)
+        tnew_c = clique_tup(new_c)
+        old_to_new_cliques[original_clique] = tnew_c
+        if tnew_c in new_cliques: continue
+        only_dummies = all(is_dummy_var(v) for v in new_c)
+        if only_dummies:
+            dummy_cliques.append(original_clique)
+            continue
+        new_cliques.append(tnew_c)
+        # print(f"  final new clique {new_c} <- {original_clique}")
+    # map dummy clique to one of its neighbors
+    for c in dummy_cliques:
+        tg_c = None
+        for nc in jt.neighbors(c):
+            if tg_c is None:
+                if old_to_new_cliques.get(nc) is not None:
+                    tg_c = nc
+                    print(f"  will point to neighbor {old_to_new_cliques[nc]}")
+                continue
+            new_n = set(old_to_new_cliques[nc])
+            new_tg = set(old_to_new_cliques[tg_c])
+            if len(new_n & new_tg) == 0:
+                d_var = None
+                for d in get_dummies(new_tg):
+                    if dummy_used_times.get(d,0) < 3:
+                        d_var = d
+                        dummy_used_times[d] += 1
+                        new_n.add(d_var)
+                        break
+                if d_var is None:
+                    for d in get_dummies(new_n):
+                        if dummy_used_times.get(d,0) < 3:
+                            d_var = d
+                            dummy_used_times[d] += 1
+                            new_tg.add(d_var)
+                            break
+                if d_var is None:
+                    # print(f"  creating dummy between ({new_tg}) ({new_n})")
+                    d_var = dummy_name(cur_dummies)
+                    dummy_used_times[d_var] = 2
+                    cur_dummies += 1
+                    new_n.add(d_var)
+                    new_tg.add(d_var)
+                old_to_new_cliques[tg_c] = clique_tup(new_tg)
+                old_to_new_cliques[nc] = clique_tup(new_n)
+        if tg_c is not None:
+            old_to_new_cliques[c] = old_to_new_cliques[tg_c]
+    if create_new_clique:
+        clique = clique_tup({new_var})
+        new_c = {new_var}
+        new_connect_c = set(old_to_new_cliques[clique_to_connect_new_clique])
+        if clique_to_connect_new_clique in dummy_cliques:
+            new_connect_c = new_c
+            clique_to_connect_new_clique = clique
+        if len(new_c & new_connect_c) == 0:
+            d_var = dummy_name(cur_dummies)
+            new_c.add(d_var)
+            new_connect_c.add(d_var)
+        tnew_c = clique_tup(new_c)
+        tnew_connect_c = clique_tup(new_connect_c)
+        # print(f"creating new clique {tnew_c} connected to {tnew_connect_c}")
+        map_clique_add.setdefault(clique,{})[new_var] = new_var_states
+        old_to_new_cliques[clique] = tnew_c
+        old_to_new_cliques[clique_to_connect_new_clique] = tnew_connect_c
+        if tnew_connect_c != tnew_c:
+            new_edges.append((tnew_connect_c,tnew_c))
+            # print(f"    {(tnew_connect_c,tnew_c)}")
+    # print(f"edges")
+    for c in old_to_new_cliques.keys():
+        if c in map_clique_add and c not in existing_cliques_to_add: continue
+        for n in jt.neighbors(c):
+            new_c = old_to_new_cliques[c]
+            new_n = old_to_new_cliques.get(n)
+            if not new_n or new_c == new_n: continue # dummy removed or self loop
+            if (new_c,new_n) in new_edges or (new_n,new_c) in new_edges: continue
+            new_edges.append((new_c,new_n))
+            # print(f"    {(new_c,new_n)}")
+    for c in dummy_cliques:
+        del old_to_new_cliques[c]
+    return map_clique_resolve, map_clique_add, new_edges, old_to_new_cliques
+
+def resolve_jt(jt, map_clique_resolve, map_clique_add, new_edges, old_to_new_cliques):
+    new_factors = []
+    q_returned_funds = 1
+
+    cliques_added = set()
+    new_cliques_added = set()
+    for fo in jt.get_factors():
+        f = fo.copy()
+        original_clique = clique_tup(f.variables)
+        s_min_value_before = min(f.values.flatten())
+        # print(f"\nfactor {original_clique}")
         resolve_list = map_clique_resolve[original_clique]
         if len(resolve_list) > 0:
-            print(f"  resolving over vars {resolve_list}")
+            # print(f"  resolving over vars {resolve_list}")
             f.reduce(resolve_list)
-        if original_clique not in old_to_new_cliques: continue
-        new_vars = set(old_to_new_cliques[original_clique]) - set(f.variables)
-        for dummy_var in new_vars:
-            f.product(create_dummy_factor(dummy_var),inplace=True)
         s_min_value = min(f.values.flatten())
-        if min_value is None or s_min_value < min_value:
-            min_value = s_min_value
-        if scale_by_local_min:
-            print(f"    dividing jt factor by local min {s_min_value}")
+        if original_clique not in old_to_new_cliques: continue
+        if old_to_new_cliques[original_clique] in new_cliques_added: continue
+        new_vars = set(old_to_new_cliques[original_clique]) - set(f.variables)
+        vars_to_add_map = map_clique_add.get(original_clique,{})
+        for new_var in new_vars:
+            if new_var in vars_to_add_map:
+                f.product(create_factor(new_var,vars_to_add_map[new_var]),inplace=True)
+            else:
+                f.product(create_dummy_factor(new_var),inplace=True)
+        if s_min_value > s_min_value_before:
+            # print(f"    dividing jt factor by local min {s_min_value}")
+            q_returned_funds *= s_min_value
             f.product(1.0/s_min_value)
         new_factors.append(f)
-        print(f"  appending factor {f.variables} with divided by min value {s_min_value}")
-        print(f)
-    if scale_by_global_min and min_value is not None and min_value > 1:
-        # return funds to user
-        print(f"dividing jt factor by global min {min_value}")
-        for f in new_factors:
-            f.product(1.0/min_value)
+        # print(f"  appending factor {f.variables}")
+        cliques_added.add(original_clique)
+        new_cliques_added.add(old_to_new_cliques[original_clique])
+    missing_cliques = set(old_to_new_cliques.keys()) - cliques_added
+    for new_clique in missing_cliques:
+        # print(f"evaluating missing cliques {new_clique}")
+        if old_to_new_cliques[new_clique] in new_cliques_added: continue
+        vars_to_add_map = map_clique_add[new_clique]
+        # print(f"  adding new clique {old_to_new_cliques[new_clique]}")
+        new_var = new_clique[0]
+        f = create_factor(new_var,vars_to_add_map[new_var])
+        new_vars = set(old_to_new_cliques[new_clique]) - {new_var}
+        for new_var in new_vars:
+            f.product(create_dummy_factor(new_var),inplace=True)
+        new_factors.append(f)
 
+    # print("=== DEBUG ===")
+    # print(map_clique_resolve)
+    # print(map_clique_add, )
+    # print(new_edges)
+    # print(old_to_new_cliques)
+    # print("\n")
+    # print(new_factors)
+    # print(new_edges)
     new_jt = JunctionTree()
-    new_jt.add_edges_from(new_edges)
+    if len(new_factors) == 1 and len(new_edges) == 0:
+        new_jt.add_node(new_factors[0].variables)
+    else:
+        new_jt.add_edges_from(new_edges)
     new_jt.add_factors(*new_factors)
-    return new_jt, min_value
+    return new_jt, q_returned_funds
 
 class PJTAmm():
     _user_jts: dict = {}
@@ -228,9 +505,7 @@ class PJTAmm():
         self._initialized = False
 
     def initialize(self, jt, b):
-        total_funds_required = 0
-        for f in jt.get_factors():
-            total_funds_required += b*sum([math.log(l) for l in f.cardinality])
+        total_funds_required = b*sum([math.log(card) for card in jt.get_cardinality().values()])
         if total_funds_required > self._amm_balance:
             raise Exception(f"AMM has not enough balance to initialize ({self._amm_balance} >= ({total_funds_required})")
         self._bp = BeliefPropagation(jt)
@@ -358,7 +633,7 @@ class PJTAmm():
         bp = self._bp
         prob_cache = {}
         def cached_prob(query_vars):
-            key = tuple(sorted(query_vars.items()))
+            key = clique_tup(query_vars.items())
             if key not in prob_cache:
                 prob_cache[key] = get_prob_fn(bp, report).get_value(**query_vars)
             return prob_cache[key]
@@ -375,13 +650,13 @@ class PJTAmm():
 
         factor_mods = {}
         for s in full_target_states:
-            factor_mods[tuple(sorted(s.items()))] = x_target / p_target
+            factor_mods[clique_tup(s.items())] = x_target / p_target
         for s in full_other_var_states_with_evidence:
             kr = {k: v for k, v in s.items() if k in report_variables}
             po = cached_prob(kr)
-            factor_mods[tuple(sorted(s.items()))] = (1 - x_target) / (1 - p_target) * ((po) / (1 - p_target))
+            factor_mods[clique_tup(s.items())] = (1 - x_target) / (1 - p_target) * ((po) / (1 - p_target))
         for s in full_other_states:
-            factor_mods[tuple(sorted(s.items()))] = 1
+            factor_mods[clique_tup(s.items())] = 1
 
         modify_factor(factor, factor_mods, m)
 
@@ -407,19 +682,15 @@ class PJTAmm():
                 needed_funds = -revert_fund(min_q, self._b)
                 self._transfer_to_amm(user_id, needed_funds)
                 q_transfered_funds = transform_fund(needed_funds, self._b)
-                for f in user_jt.get_factors():
-                    f.product(q_transfered_funds)
-                    # TODO: Solve float approx error
+                user_factor.product(q_transfered_funds)
+                # TODO: Solve float approx error
             elif min_q_before <= 1 and min_q > 1:
                 # get new global min
-                factor_min_value = min([min(f.values) for f in cur_jt.get_factors()])
-                if factor_min_value > 1:
-                    # return funds to user
-                    returned_funds = revert_fund(factor_min_value, self._b)
-                    self._transfer_from_amm(user_id, returned_funds)
-                    q_returned_funds = transform_fund(returned_funds, self._b)
-                    for f in user_jt.get_factors():
-                        f.divide(q_returned_funds)
+                # return funds to user
+                returned_funds = revert_fund(min_q, self._b)
+                self._transfer_from_amm(user_id, returned_funds)
+                q_returned_funds = transform_fund(returned_funds, self._b)
+                user_factor.product(1/q_returned_funds)
 
             # # Update the junction tree with the modified factor
             # cur_jt.add_factors(factor)
@@ -553,27 +824,64 @@ class PJTAmm():
         Resolve a variable (e.g., ('asia', 1)) in the global JT and all user JTs.
         This updates self._bp.junction_tree and all self._user_jts in place, atomically.
         """
+        if not self._initialized: raise Exception("AMM not initialized")
+        if factor_with_vars([resolve[0]],self._bp.junction_tree) is None:
+            raise Exception(f"No factor found with variable in resolve")
 
         map_clique_resolve, new_edges, old_to_new_cliques = \
             get_resolve_instructions(self._bp.junction_tree,resolve)
 
-        results = {}
-        try:
+        if True:
             # Global JT
-            new_jt, _ = resolve_jt(self._bp.junction_tree, map_clique_resolve, new_edges, old_to_new_cliques, \
-                scale_by_local_min = True)
+            new_jt, _ = resolve_jt(self._bp.junction_tree, map_clique_resolve, {}, new_edges, old_to_new_cliques)
 
             # User JTs
             new_user_jt = {}
             user_jt_updates = {}
             for user_id, user_jt in self._user_jts.items():
-                new_user_jt, min_value = resolve_jt(user_jt, map_clique_resolve, new_edges, old_to_new_cliques, \
-                        scale_by_global_min = True)
+                new_user_jt, q_returned_funds = resolve_jt(user_jt, map_clique_resolve, {}, new_edges, old_to_new_cliques)
                 user_jt_updates[user_id] = new_user_jt
-                if min_value < 1: raise Exception(f"User {user_id} has insufficient funds to resolve {resolve}")
-                if min_value > 1:
-                    returned_funds = revert_fund(min_value, self._b)
+                if q_returned_funds < 1: raise Exception(f"User {user_id} has insufficient funds to resolve {resolve}")
+                if q_returned_funds > 1:
+                    returned_funds = revert_fund(q_returned_funds, self._b)
                     self._transfer_from_amm(user_id, returned_funds)
+
+            # If all succeed, update in place
+            bp = BeliefPropagation(new_jt)
+            bp.calibrate()
+            self._bp = bp
+            for user_id, new_user_jt in user_jt_updates.items():
+                self._user_jts[user_id] = new_user_jt
+            return bp
+        # except Exception as e:
+        #     # logger.error(f"Failed to resolve {resolve}: {e}")
+        #     raise
+
+    def perform_add(self, new_var, new_var_states, cliques_to_add):
+        """
+        Adds a variable in the global JT and all user JTs.
+        This updates self._bp.junction_tree and all self._user_jts in place, atomically.
+        """
+        if not self._initialized: raise Exception("AMM not initialized")
+
+        total_funds_required = self._b*sum([math.log(card) for card in self._bp.junction_tree.get_cardinality().values()])
+        total_funds_required = self._b*math.log(new_var_states)
+        if total_funds_required > self._amm_balance:
+            raise Exception(f"AMM has not enough balance to initialize ({self._amm_balance} >= ({total_funds_required})")
+
+        map_clique_resolve, map_clique_add, new_edges, old_to_new_cliques = \
+            get_add_variable_instructions(self._bp.junction_tree, new_var, new_var_states, cliques_to_add)
+
+        try:
+            # Global JT
+            new_jt, _ = resolve_jt(self._bp.junction_tree, map_clique_resolve, map_clique_add, new_edges, old_to_new_cliques)
+
+            # User JTs
+            new_user_jt = {}
+            user_jt_updates = {}
+            for user_id, user_jt in self._user_jts.items():
+                new_user_jt, _ = resolve_jt(user_jt, map_clique_resolve, map_clique_add, new_edges, old_to_new_cliques)
+                user_jt_updates[user_id] = new_user_jt
 
             # If all succeed, update in place
             bp = BeliefPropagation(new_jt)

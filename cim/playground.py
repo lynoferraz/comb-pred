@@ -1,12 +1,15 @@
 # %% Imports
 
+import networkx as nx
+from IPython.display import Image
+
 from pgmpy.models import JunctionTree
 from pgmpy.factors.discrete import DiscreteFactor
 from pgmpy.utils import get_example_model
 
 import importlib
 
-from cim import auto_market_maker
+import auto_market_maker
 
 # %% Original model
 
@@ -85,17 +88,49 @@ amm.deposit_funds(user_id,user_desposit)
 
 amm.perform_edit(report,user_id)
 
-amm.get_expected_funds_value(user_id)
-amm.get_edit_bounds(report2,user_id)
-amm.get_edit_cost_delta(report2,user_id)
+# amm.get_expected_funds_value(user_id)
+# amm.get_edit_bounds(report2,user_id)
+# amm.get_edit_cost_delta(report2,user_id)
 
-print(amm.query(variables=report['variables'],evidence=report.get('evidence'),user_id=0))
+# print(amm.query(variables=report['variables'],evidence=report.get('evidence'),user_id=0))
 
 amm.perform_resolve(('either',1))
 
-amm.get_expected_funds_value(user_id)
-amm.get_edit_bounds(report2,user_id)
-amm.get_edit_cost_delta(report2,user_id)
+# amm.get_expected_funds_value(user_id)
+# amm.get_edit_bounds(report2,user_id)
+# amm.get_edit_cost_delta(report2,user_id)
 
-print(amm.query(variables=report2['variables'],evidence=report2.get('evidence')))
-print(amm.query(variables=report2['variables'],evidence=report2.get('evidence'),user_id=0))
+# print(amm.query(variables=report2['variables'],evidence=report2.get('evidence')))
+# print(amm.query(variables=report2['variables'],evidence=report2.get('evidence'),user_id=0))
+
+# amm.perform_add('eeu',2,[['asia'],None])
+
+# map_clique_resolve, map_clique_add, new_edges, old_to_new_cliques = auto_market_maker.get_add_variable_instructions(amm._bp.junction_tree,'eeu',2,[['xray'],['dysp']])
+# new_jt, min_value_ = auto_market_maker.resolve_jt(amm._bp.junction_tree, map_clique_resolve, map_clique_add, new_edges, old_to_new_cliques)
+
+pgv_agraph = nx.nx_agraph.to_agraph(amm._bp.junction_tree)
+pgv_agraph.layout(prog='dot')
+pgv_agraph.draw('new_jt_graph.png')
+Image('new_jt_graph.png')
+
+# %% More operations
+importlib.reload(auto_market_maker)
+amm.perform_resolve(('lung',1))
+# amm.perform_add('nam',2,[['lung']])
+# amm.perform_add('co',2,[['oca'],['cao']])
+
+pgv_agraph = nx.nx_agraph.to_agraph(amm._bp.junction_tree)
+pgv_agraph.layout(prog='dot')
+pgv_agraph.draw('new_jt_graph.png')
+Image('new_jt_graph.png')
+
+# %% More operations
+# importlib.reload(auto_market_maker)
+# auto_market_maker.factor_with_vars(['lung'],amm._bp.junction_tree)
+
+# print(amm.query(variables=report['variables'],evidence=report.get('evidence'),user_id=user_id))
+print(amm.get_user_jt(user_id).factors[1])
+
+print(amm.get_user_free_funds(user_id))
+
+print(amm.get_expected_funds_value(user_id))
