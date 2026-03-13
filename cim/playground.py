@@ -9,6 +9,7 @@ from pgmpy.utils import get_example_model
 
 import importlib
 
+# from cim import auto_market_maker
 import auto_market_maker
 
 # %% Original model
@@ -56,12 +57,15 @@ for clique in cliques:
 
 jt.add_factors(*phis)
 
-report = {'variables': {'either': 1}, 'evidence': {'lung': 1}, 'value': 0.9}
+report = {'variables': {'either': 1}, 'evidence': {'lung': 1}, 'value': 0.7}
 report2 = {'variables': {'lung': 1}, 'value': 0.9}
 b = 72
 amm_deposit = 1000
 user_desposit = 200
 user_id = 0
+
+user_2 = 1
+report_2 = {'variables': {'either': 1}, 'evidence': {'lung': 1}, 'value': 0.95}
 
 pgv_agraph = nx.nx_agraph.to_agraph(jt)
 pgv_agraph.layout(prog='dot')
@@ -77,25 +81,45 @@ amm = auto_market_maker.PJTAmm()
 amm.deposit_amm(amm_deposit)
 amm.initialize(jt, b=b)
 
-# print(amm.query(variables=report['variables'],evidence=report.get('evidence')))
-
 amm.deposit_funds(user_id,user_desposit)
-# amm.get_edit_bounds(report,user_id)
-# amm.get_expected_funds_value(user_id)
-# amm.get_edit_cost_delta(report,user_id)
+# print(amm.get_edit_bounds(report,user_id))
+# print(amm.get_expected_funds_value(user_id))
+# print(amm.get_edit_cost_delta(report,user_id))
+# print(amm.get_user_free_funds(user_id))
 
-# print(amm.query(variables=report['variables'],evidence=report.get('evidence'),user_id=user_id))
+# amm.perform_edit({'variables': {'either': 1, 'tub': 0}, 'evidence': {'lung': 1}, 'value': 0.475},0)
+# print(amm.query(['either', 'tub'], {'lung': 1}))
 
 amm.perform_edit(report,user_id)
 
-# amm.get_expected_funds_value(user_id)
-# amm.get_edit_bounds(report2,user_id)
-# amm.get_edit_cost_delta(report2,user_id)
+print(amm.get_expected_funds_value(user_id))
+print(amm.get_user_free_funds(user_id))
 
-# print(amm.query(variables=report['variables'],evidence=report.get('evidence'),user_id=0))
+amm.deposit_funds(user_2,user_desposit)
+amm.perform_edit(report_2,user_2)
+
+print(amm.query(variables=report['variables'],evidence=report.get('evidence'),user_id=0))
+# print(amm.query(variables=['lung','tub','either']))
+
+liq_report, expected_value = amm.simulate_liquidation(user_id=user_id,variables=['either','tub'],evidence=report.get('evidence'))
+# liq_report, expected_value = amm.simulate_liquidation(user_id=user_id,variables=report['variables'],evidence=report.get('evidence'))
+
+print(f"Simulated liquidation report: {liq_report}, expected min value after liquidation: {expected_value}")
+
+amm.perform_edit(liq_report,user_id)
+print(amm.query(variables=liq_report['variables'],evidence=liq_report.get('evidence'),user_id=user_id))
+print(amm.query(variables=liq_report['variables'],evidence=liq_report.get('evidence')))
+
 
 amm.perform_resolve(('either',1))
+print(amm.query(variables=['lung'],user_id=0))
+print(amm.query(variables=['lung']))
 
+print(amm.query(variables=[],evidence={'lung':1},user_id=0))
+print(amm.query(variables=[],evidence={'lung':1}))
+
+print(amm.get_expected_funds_value(user_id))
+print(amm.get_user_free_funds(user_id))
 # amm.get_expected_funds_value(user_id)
 # amm.get_edit_bounds(report2,user_id)
 # amm.get_edit_cost_delta(report2,user_id)
@@ -115,9 +139,19 @@ Image('new_jt_graph.png')
 
 # %% More operations
 importlib.reload(auto_market_maker)
-amm.perform_resolve(('lung',1))
+# amm.perform_resolve(('lung',1))
+# amm.perform_resolve(('bronc',1))
+# amm.perform_resolve(('dysp',1))
+# amm.perform_resolve(('tub',1))
+# amm.perform_resolve(('smoke',1))
+# amm.perform_resolve(('asia',1))
+# amm.perform_resolve(('xray',1))
 # amm.perform_add('nam',2,[['lung']])
 # amm.perform_add('co',2,[['oca'],['cao']])
+# amm.perform_add('nam',2,[None])
+# amm.perform_add('nam2',2,[None])
+# amm.perform_add('nam3',2,[['nam']])
+amm.perform_add('nam4',2,[['nam'],['nam2']])
 
 pgv_agraph = nx.nx_agraph.to_agraph(amm._bp.junction_tree)
 pgv_agraph.layout(prog='dot')

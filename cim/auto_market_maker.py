@@ -8,6 +8,7 @@ from pgmpy.models import JunctionTree
 
 # logging.basicConfig(level="INFO")
 logger = logging.getLogger(__name__)
+logging.getLogger("pgmpy").setLevel(logging.WARNING)
 
 def factor_with_vars(vars, j):
     possible_fs = []
@@ -40,6 +41,17 @@ dummy_name = lambda idx: f"{dummy_prefix}{idx}"
 create_dummy_factor = lambda n: create_factor(n,1)
 create_factor = lambda n,s: DiscreteFactor([n], [s], [1]*s)
 
+def create_or_reuse_dummy(cur_dummies, used_times, new_c, max_reuse=3, create_new=True):
+    for d_var in get_dummies(new_c):
+        if used_times.get(d_var, 0) < max_reuse:
+            used_times[d_var] = used_times.get(d_var, 0) + 1
+            return d_var, cur_dummies
+    if not create_new: return None, cur_dummies
+    d_var = dummy_name(cur_dummies)
+    used_times[d_var] = 2
+    cur_dummies += 1
+    return d_var, cur_dummies
+
 get_prob_fn = lambda bfp, r: bfp.query(variables=list(r['variables'].keys()), evidence=r.get('evidence'))
 
 clique_tup = lambda c: tuple(sorted(c))
@@ -54,11 +66,11 @@ def enumerate_states(report, factor):
     wf = factor.normalize(inplace=False).marginalize(vars_not_in_report, inplace=False)
     #
     target_state = {var: report["variables"][var] for var in report_variables}
-    value_lists = [
-        [s for s in wf.state_names[var] if s != report["variables"][var]]
-        for var in report_variables
-    ]
-    other_var_states = [dict(zip(report_variables, prod)) for prod in itertools.product(*value_lists)]
+    considered_evidence = {var: report["evidence"][var] for var in evidence_vars if var in wf.variables}
+    target_state_s = set(target_state.items())
+    wf_reduced = wf.reduce(considered_evidence.items(), inplace=False)
+    other_var_states = [dict(wf_reduced.assignment([s_ind])[0]) for s_ind in range(math.prod(wf_reduced.cardinality))
+        if set(wf_reduced.assignment([s_ind])[0]) != target_state_s]
     #
     other_var_states_with_evidence = []
     other_states = []
@@ -110,8 +122,32 @@ def modify_factor(factor, factor_mods, m):
         value = factor.get_value(**s)
         factor.set_value(value * m * modifier, **s)
 
-def get_resolve_instructions(jt, resolve):
-    resolve_var = resolve[0]
+def get_jt_update_instructions(
+    jt,
+    operation: str,
+    variable: str = None,
+    value: int = None,
+    new_var_states: int = None,
+    cliques_to_add: list = None
+):
+    """
+    Enhanced unified function for generating JT update instructions for resolving or adding a variable.
+    Centralized dummy handling, robust validation, reduced complexity, clear return structure.
+    operation: 'resolve' or 'add'
+    variable: variable to resolve or add
+    value: value to resolve to (for resolve)
+    new_var_states: cardinality for new variable (for add)
+    cliques_to_add: cliques to add variable to (for add)
+    """
+    if jt is None or not hasattr(jt, 'get_factors'):
+        raise ValueError("jt must be a valid JunctionTree")
+    if operation not in ('resolve', 'add'):
+        raise ValueError(f"Unsupported operation: {operation}")
+    if variable is None:
+        raise ValueError("Variable must be provided")
+    if operation == 'add' and (cliques_to_add is None or not isinstance(cliques_to_add, list)):
+        raise ValueError("cliques_to_add must be a list of cliques for 'add' operation")
+
     cur_dummies = 0
     cliques_connected = []
     dummies_to_add = {}
@@ -119,14 +155,63 @@ def get_resolve_instructions(jt, resolve):
     new_cliques = []
     dummy_cliques = []
     leaf_cliques = []
-    dummy_resolutions = []
     map_clique_resolve = {}
+    map_clique_add = {}
     dummy_used_times = {}
+    existing_cliques_to_add = []
+    create_new_clique = False
+    clique_to_connect_new_clique = None
+    new_edges = []
+
+    var_to_resolve = set()
+    tup_to_resolve = []
+
+    # print(f"\n* Update Instructions {operation=} *")
+
+    # Operation-specific configuration
+    if operation == 'resolve':
+        var_to_resolve.add(variable)
+        tup_to_resolve.append((variable, value))
+
+    elif operation == 'add':
+        if len(cliques_to_add) < 1 or len(cliques_to_add) > 3:
+            raise Exception(f"Can't add variable with {len(cliques_to_add)} cliques")
+        for f in jt.get_factors():
+            if variable in f.variables:
+                raise Exception(f"Can't add existing variable")
+        for co in cliques_to_add:
+            if co is None:
+                create_new_clique = True
+                continue
+            f = factor_with_vars(co, jt)
+            c = clique_tup(f.variables)
+            if f is None:
+                raise Exception(f"Clique {c} does not exist in Junction Tree")
+            existing_cliques_to_add.append(c)
+        if create_new_clique:
+            if len(existing_cliques_to_add) > 0:
+                clique_to_connect_new_clique = min(existing_cliques_to_add, key=lambda c: len(c))
+            else:
+                cliques = [clique_tup(f.variables) for f in jt.get_factors()]
+                clique_to_connect_new_clique = min(cliques, key=lambda c: len(c))
+        if len(existing_cliques_to_add) > 1:
+            for c in existing_cliques_to_add:
+                has_neighbor = False
+                for n in jt.neighbors(c):
+                    no = clique_tup(n)
+                    if no in existing_cliques_to_add:
+                        has_neighbor = True
+                        break
+                if not has_neighbor:
+                    raise Exception(f"Clique {c} has no connection to other requested cliques")
+
+    # Main logic (flattened, direct mapping)
     for fn in jt.get_factors():
         new_c = set(fn.variables)
         original_clique = clique_tup(new_c)
         # print(f"factor {original_clique}")
-        resolve_list = [resolve] if resolve[0] in new_c else []
+        resolve_list = []
+        if variable in new_c and variable in var_to_resolve: resolve_list.extend(tup_to_resolve)
         for d in get_dummies(fn.variables): resolve_list.append((d,0))
         map_clique_resolve[original_clique] = resolve_list
         resolve_vars = {t[0] for t in resolve_list}
@@ -134,6 +219,9 @@ def get_resolve_instructions(jt, resolve):
         new_c = new_c - resolve_vars
         cliques_connected.append(original_clique)
         new_c = new_c | set((dummies_to_add.get(original_clique,{})).values())
+        if original_clique in existing_cliques_to_add:
+            map_clique_add.setdefault(original_clique,{})[variable] = new_var_states
+            new_c.add(variable)
         neighbors = list(jt.neighbors(original_clique))
         if len(new_c) == 0 and len(neighbors) == 1: # leaf
             # print(f"  skipping leaf clique")
@@ -142,11 +230,12 @@ def get_resolve_instructions(jt, resolve):
         only_dummies = all(is_dummy_var(v) for v in new_c)
         # print(f"  new edges {new_c}")
         for no in neighbors:
-            new_n = set(no) - resolve_vars - {resolve[0]}- set(get_dummies(no))
+            new_n = set(no) - resolve_vars - var_to_resolve - set(get_dummies(no))
             original_n = clique_tup(no)
+            if clique_tup(no) in existing_cliques_to_add:
+                new_n.add(variable)
             # print(f"    connecting to {original_n} ({new_n})")
             if original_n in cliques_connected: continue
-
             if original_n in leaf_cliques:
                 # print(f"    skipping leaf neighbor")
                 continue
@@ -156,21 +245,10 @@ def get_resolve_instructions(jt, resolve):
             if len(new_n & new_c) == 0 and \
                     (dummies_to_add.get(original_clique) is None or \
                         dummies_to_add[original_clique].get(no) is None):
-                added_dummy = False
-                if only_dummies:
-                    for d_var in new_c:
-                        if dummy_used_times.get(d_var,0) < 3:
-                            dummies_to_add.setdefault(no,{})[original_clique] = d_var
-                            added_dummy = True
-                            # print(f"    using dummy {d_var} on {no}")
-                            break
-                if not added_dummy:
-                    # print(f"    creating dummy")
-                    d_var = dummy_name(cur_dummies)
-                    cur_dummies += 1
-                    dummies_to_add.setdefault(no,{})[original_clique] = d_var
-                    new_c.add(d_var)
-                    dummy_used_times[d_var] = 2
+                d_var, cur_dummies = create_or_reuse_dummy(cur_dummies, dummy_used_times, new_c)
+                dummies_to_add.setdefault(no,{})[original_clique] = d_var
+                new_c.add(d_var)
+                # print(f"    using dummy {d_var} on {no}")
             cliques_connected.append(original_n)
         tnew_c = clique_tup(new_c)
         old_to_new_cliques[original_clique] = tnew_c
@@ -179,52 +257,69 @@ def get_resolve_instructions(jt, resolve):
             dummy_cliques.append(original_clique)
             continue
         new_cliques.append(tnew_c)
-    # map dummy clique to one of its neighbors
+    # Dummy clique neighbor mapping
     for c in dummy_cliques:
-        # print(f"dummy clique {old_to_new_cliques[c]} ({c})")
         tg_c = None
+        dummies_in_clique = []
+        # print(f"dummy clique {c} -> {old_to_new_cliques[c]}")
         for nc in jt.neighbors(c):
-            # print(f"  evaluating {nc})")
+            # print(f"  evaluating {nc} -> {old_to_new_cliques[nc]}")
             if tg_c is None:
                 if old_to_new_cliques.get(nc) is not None:
                     tg_c = nc
                     # print(f"  will point to neighbor {old_to_new_cliques[nc]}")
+                # reduce dummy_used_times
+                dummies_in_clique = get_dummies(old_to_new_cliques[c])
+                for d_var in dummies_in_clique:
+                    dummy_used_times[d_var] = dummy_used_times.get(d_var, 1) - 1
                 continue
             new_n = set(old_to_new_cliques[nc])
             new_tg = set(old_to_new_cliques[tg_c])
             if len(new_n & new_tg) == 0:
-                d_var = None
-                for d in get_dummies(new_tg):
-                    if dummy_used_times.get(d,0) < 3:
-                        d_var = d
-                        dummy_used_times[d] += 1
-                        new_n.add(d_var)
-                        break
+                d_var, cur_dummies = create_or_reuse_dummy(cur_dummies, dummy_used_times, new_tg, create_new=False)
                 if d_var is None:
-                    for d in get_dummies(new_n):
-                        if dummy_used_times.get(d,0) < 3:
-                            d_var = d
-                            dummy_used_times[d] += 1
-                            new_tg.add(d_var)
-                            break
+                    d_var, cur_dummies = create_or_reuse_dummy(cur_dummies, dummy_used_times, new_n, create_new=False)
                 if d_var is None:
-                    # print(f"  creating dummy between ({new_tg}) ({new_n})")
-                    d_var = dummy_name(cur_dummies)
-                    dummy_used_times[d_var] = 2
-                    cur_dummies += 1
-                    new_n.add(d_var)
-                    new_tg.add(d_var)
+                    d_var, cur_dummies = create_or_reuse_dummy(cur_dummies, dummy_used_times, new_tg)
+                new_n.add(d_var)
+                new_tg.add(d_var)
+                for d in get_dummies(new_n):
+                    if dummy_used_times.get(d,0) < 2:
+                        new_n.remove(d)
+                        dummy_used_times[d] = dummy_used_times.get(d, 1) - 1
+                # print(f"  using dummy {d_var} between ({new_tg}) ({new_n})")
                 old_to_new_cliques[tg_c] = clique_tup(new_tg)
                 old_to_new_cliques[nc] = clique_tup(new_n)
         if tg_c is not None:
             old_to_new_cliques[c] = old_to_new_cliques[tg_c]
-    # print(f"edges")
-    new_edges = []
+    if create_new_clique:
+        clique = clique_tup({variable})
+        new_c = {variable}
+        new_connect_c = set(old_to_new_cliques[clique_to_connect_new_clique])
+        if clique_to_connect_new_clique in dummy_cliques:
+            new_connect_c = new_c
+            clique_to_connect_new_clique = clique
+        if len(new_c & new_connect_c) == 0:
+            d_var, cur_dummies = create_or_reuse_dummy(cur_dummies, dummy_used_times, new_connect_c)
+            new_c.add(d_var)
+            new_connect_c.add(d_var)
+        tnew_c = clique_tup(new_c)
+        tnew_connect_c = clique_tup(new_connect_c)
+        # print(f"creating new clique {tnew_c} connected to {tnew_connect_c}")
+        map_clique_add.setdefault(clique,{})[variable] = new_var_states
+        old_to_new_cliques[clique] = tnew_c
+        old_to_new_cliques[clique_to_connect_new_clique] = tnew_connect_c
+        if tnew_connect_c != tnew_c:
+            new_edges.append((tnew_connect_c,tnew_c))
+            # print(f"    {(tnew_connect_c,tnew_c)}")
+    # Edge construction
     for c in old_to_new_cliques.keys():
+        if c in map_clique_add and c not in existing_cliques_to_add: continue
         for n in jt.neighbors(c):
             new_c = old_to_new_cliques[c]
             new_n = old_to_new_cliques.get(n)
-            if not new_n or new_c == new_n: continue # dummy removed or self loop
+            # remove dummy or self loop
+            if not new_n or new_c == new_n: continue
             if (new_c,new_n) in new_edges or (new_n,new_c) in new_edges: continue
             new_edges.append((new_c,new_n))
             # print(f"    {(new_c,new_n)}")
@@ -236,198 +331,20 @@ def get_resolve_instructions(jt, resolve):
         cur_dummies += 1
         old_to_new_cliques[c] = clique_tup({d_var})
         # print(f"create placeholder dummy node {c} {old_to_new_cliques[c]}")
-    return map_clique_resolve, new_edges, old_to_new_cliques
+    return {
+        "old_to_new_cliques": old_to_new_cliques,
+        "new_edges": new_edges,
+        "map_clique_resolve": map_clique_resolve,
+        "map_clique_add": map_clique_add,
+    }
+
+def get_resolve_instructions(jt, resolve):
+    res = get_jt_update_instructions(jt, 'resolve', variable=resolve[0], value=resolve[1])
+    return res['map_clique_resolve'], res['new_edges'], res['old_to_new_cliques']
 
 def get_add_variable_instructions(jt, new_var, new_var_states, cliques_to_add):
-    # can add to new facto
-    if len(cliques_to_add) < 1 or len(cliques_to_add) > 3:
-        raise Exception(f"Can't add variable with {len(cliques_to_add)} cliques")
-
-    for f in jt.get_factors():
-        if new_var in f.variables:
-            raise Exception(f"Can't add existing variable")
-
-    new_edges = []
-    old_to_new_cliques = {}
-    map_clique_add = {}
-    cur_dummies = 0
-    dummies_to_add = {}
-    existing_cliques_to_add = []
-    create_new_clique = False
-    clique_to_connect_new_clique = None
-    for co in cliques_to_add:
-        # print(f"Trying to add new var to clique with {co}")
-        if co is None:
-            # new clique with var
-            create_new_clique = True
-            continue
-        f = factor_with_vars(co,jt)
-        c = clique_tup(f.variables)
-        if f is None:
-            raise Exception(f"Clique {c} does not exist in Junction Tree")
-        existing_cliques_to_add.append(c)
-        # print(f"Adding new var to clique {c}")
-    if create_new_clique:
-        if len(existing_cliques_to_add) > 0:
-            clique_to_connect_new_clique = min(existing_cliques_to_add,key=lambda c:len(c))
-        else:
-            cliques = [clique_tup(f.variables) for f in jt.get_factors()]
-            clique_to_connect_new_clique = min(cliques,key=lambda c:len(c))
-        # print(f"Will connect new clique to {clique_to_connect_new_clique}")
-    if len(existing_cliques_to_add) > 1:
-        for c in existing_cliques_to_add:
-            has_neighbor = False
-            for n in jt.neighbors(c):
-                no = clique_tup(n)
-                if no in existing_cliques_to_add:
-                    has_neighbor = True
-                    break
-            if not has_neighbor:
-                raise Exception(f"Clique {c} has no connection to other requested cliques")
-
-    # resolve dommies and add if necessary
-    cliques_connected = []
-    new_cliques = []
-    dummy_cliques = []
-    leaf_cliques = []
-    dummy_resolutions = []
-    map_clique_resolve = {}
-    dummy_used_times = {}
-    for fn in jt.get_factors():
-        new_c = set(fn.variables)
-        original_clique = clique_tup(new_c)
-        # print(f"factor {original_clique}")
-        resolve_list = []
-        for d in get_dummies(fn.variables): resolve_list.append((d,0))
-        map_clique_resolve[original_clique] = resolve_list
-        resolve_vars = {t[0] for t in resolve_list}
-        # print(f"  resolving over vars {resolve_vars}")
-        new_c = new_c - resolve_vars
-        cliques_connected.append(original_clique)
-        new_c = new_c | set((dummies_to_add.get(original_clique,{})).values())
-        if original_clique in existing_cliques_to_add:
-            # add variable to clique
-            # print(f"  add new var {new_var}")
-            map_clique_add.setdefault(original_clique,{})[new_var] = new_var_states
-            new_c.add(new_var)
-        neighbors = list(jt.neighbors(original_clique))
-        if len(new_c) == 0 and len(neighbors) == 1: # leaf
-            # print(f"  skipping leaf clique {fu.values=}")
-            leaf_cliques.append(original_clique)
-            continue
-        only_dummies = all(is_dummy_var(v) for v in new_c)
-        # print(f"  new edges {new_c}")
-        for no in neighbors:
-            new_n = set(no) - resolve_vars - set(get_dummies(no))
-            if clique_tup(no) in existing_cliques_to_add:
-                new_n.add(new_var)
-            original_n = clique_tup(no)
-            # print(f"    connecting to {original_n}")
-            if original_n in cliques_connected: continue
-            if original_n in leaf_cliques:
-                # print(f"    skipping leaf neighbor")
-                continue
-            if len(new_n) == 0 and len(list(jt.neighbors(no))):
-                # print(f"    skipping leaf neighbor (tbd)")
-                continue
-            if len(new_n & new_c) == 0 and \
-                    (dummies_to_add.get(original_clique) is None or \
-                        dummies_to_add[original_clique].get(no) is None):
-                added_dummy = False
-                if only_dummies:
-                    for d_var in new_c:
-                        if dummy_used_times.get(d_var,0) < 3:
-                            dummies_to_add.setdefault(no,{})[original_clique] = d_var
-                            added_dummy = True
-                            # print(f"    using dummy {d_var} on {no}")
-                            break
-                if not added_dummy:
-                    # print(f"    creating dummy")
-                    d_var = dummy_name(cur_dummies)
-                    cur_dummies += 1
-                    dummies_to_add.setdefault(no,{})[original_clique] = d_var
-                    new_c.add(d_var)
-                    dummy_used_times[d_var] = 2
-            cliques_connected.append(original_n)
-        tnew_c = clique_tup(new_c)
-        old_to_new_cliques[original_clique] = tnew_c
-        if tnew_c in new_cliques: continue
-        only_dummies = all(is_dummy_var(v) for v in new_c)
-        if only_dummies:
-            dummy_cliques.append(original_clique)
-            continue
-        new_cliques.append(tnew_c)
-        # print(f"  final new clique {new_c} <- {original_clique}")
-    # map dummy clique to one of its neighbors
-    for c in dummy_cliques:
-        tg_c = None
-        for nc in jt.neighbors(c):
-            if tg_c is None:
-                if old_to_new_cliques.get(nc) is not None:
-                    tg_c = nc
-                    print(f"  will point to neighbor {old_to_new_cliques[nc]}")
-                continue
-            new_n = set(old_to_new_cliques[nc])
-            new_tg = set(old_to_new_cliques[tg_c])
-            if len(new_n & new_tg) == 0:
-                d_var = None
-                for d in get_dummies(new_tg):
-                    if dummy_used_times.get(d,0) < 3:
-                        d_var = d
-                        dummy_used_times[d] += 1
-                        new_n.add(d_var)
-                        break
-                if d_var is None:
-                    for d in get_dummies(new_n):
-                        if dummy_used_times.get(d,0) < 3:
-                            d_var = d
-                            dummy_used_times[d] += 1
-                            new_tg.add(d_var)
-                            break
-                if d_var is None:
-                    # print(f"  creating dummy between ({new_tg}) ({new_n})")
-                    d_var = dummy_name(cur_dummies)
-                    dummy_used_times[d_var] = 2
-                    cur_dummies += 1
-                    new_n.add(d_var)
-                    new_tg.add(d_var)
-                old_to_new_cliques[tg_c] = clique_tup(new_tg)
-                old_to_new_cliques[nc] = clique_tup(new_n)
-        if tg_c is not None:
-            old_to_new_cliques[c] = old_to_new_cliques[tg_c]
-    if create_new_clique:
-        clique = clique_tup({new_var})
-        new_c = {new_var}
-        new_connect_c = set(old_to_new_cliques[clique_to_connect_new_clique])
-        if clique_to_connect_new_clique in dummy_cliques:
-            new_connect_c = new_c
-            clique_to_connect_new_clique = clique
-        if len(new_c & new_connect_c) == 0:
-            d_var = dummy_name(cur_dummies)
-            new_c.add(d_var)
-            new_connect_c.add(d_var)
-        tnew_c = clique_tup(new_c)
-        tnew_connect_c = clique_tup(new_connect_c)
-        # print(f"creating new clique {tnew_c} connected to {tnew_connect_c}")
-        map_clique_add.setdefault(clique,{})[new_var] = new_var_states
-        old_to_new_cliques[clique] = tnew_c
-        old_to_new_cliques[clique_to_connect_new_clique] = tnew_connect_c
-        if tnew_connect_c != tnew_c:
-            new_edges.append((tnew_connect_c,tnew_c))
-            # print(f"    {(tnew_connect_c,tnew_c)}")
-    # print(f"edges")
-    for c in old_to_new_cliques.keys():
-        if c in map_clique_add and c not in existing_cliques_to_add: continue
-        for n in jt.neighbors(c):
-            new_c = old_to_new_cliques[c]
-            new_n = old_to_new_cliques.get(n)
-            if not new_n or new_c == new_n: continue # dummy removed or self loop
-            if (new_c,new_n) in new_edges or (new_n,new_c) in new_edges: continue
-            new_edges.append((new_c,new_n))
-            # print(f"    {(new_c,new_n)}")
-    for c in dummy_cliques:
-        del old_to_new_cliques[c]
-    return map_clique_resolve, map_clique_add, new_edges, old_to_new_cliques
+    res = get_jt_update_instructions(jt, 'add', variable=new_var, new_var_states=new_var_states, cliques_to_add=cliques_to_add)
+    return res['map_clique_resolve'], res['map_clique_add'], res['new_edges'], res['old_to_new_cliques']
 
 def resolve_jt(jt, map_clique_resolve, map_clique_add, new_edges, old_to_new_cliques):
     new_factors = []
@@ -579,23 +496,76 @@ class PJTAmm():
         self._user_free_funds[user_id] = new_user_funds
         self._amm_balance = new_amm_funds
 
-    def query(self, variables, evidence=None, user_id=None):
+    def query(self, variables, evidence={}, user_id=None):
         if not self._initialized: raise Exception("AMM not initialized")
         if user_id is not None:
             user_jt = self.get_user_jt(user_id)
             funds0 = self.get_user_free_funds(user_id)
-            considered_evidence = evidence or {}
-            evidence_set = set(considered_evidence)
             variables_set = set(variables)
-            factor = factor_with_most_vars(variables_set | evidence_set,user_jt).reduce(considered_evidence.items(),inplace=False)
-            cur_query = self._bp.query(variables=set(factor.variables) - evidence_set, evidence=considered_evidence)
+            factor = factor_with_most_vars(variables_set | set(evidence),user_jt).copy()
+            considered_evidence = {var: evidence[var] for var in evidence if var in factor.variables}
+            factor.reduce(considered_evidence.items(),inplace=True)
+            size_before = factor.values.size
+            factor.marginalize(set(factor.variables) - variables_set,inplace=True)
+            factor.product(factor.values.size/size_before)
             for s_ind in range(math.prod(factor.cardinality)):
                 s = dict(factor.assignment([s_ind])[0])
-                factor.set_value(cur_query.get_value(**s)*revert_fund(factor.get_value(**s), self._b), **s)
-            factor.marginalize(set(factor.variables) - variables_set,inplace=True)
+                factor.set_value(revert_fund(factor.get_value(**s), self._b), **s)
             factor.sum(funds0,inplace=True)
             return factor
         return self._bp.query(variables=list(variables), evidence=evidence)
+
+    # TODO: check why liquidation doesnt give max profit
+    def simulate_liquidation(self, user_id, variables, evidence={}):
+        if not self._initialized: raise Exception("AMM not initialized")
+
+        # get user factor probablities
+        user_jt = self.get_user_jt(user_id)
+        funds0 = self.get_user_free_funds(user_id)
+        variables_set = set(variables)
+        factor = factor_with_most_vars(variables_set | set(evidence),user_jt).copy()
+        considered_evidence = {var: evidence[var] for var in evidence if var in factor.variables}
+        evidence_set = set(considered_evidence)
+        factor.reduce(considered_evidence.items(),inplace=True)
+        size_before = factor.values.size
+
+        factor.marginalize(set(factor.variables) - variables_set,inplace=True)
+        factor.product(factor.values.size/size_before)
+
+        # get current probablities
+        cur_query = self._bp.query(variables=set(factor.variables) - evidence_set, evidence=considered_evidence)
+        cur_query.marginalize(set(cur_query.variables) - variables_set)
+
+        # get max and min states factor probablities
+        max_state = (0,0,{})
+        min_state = None
+        n_states = math.prod(factor.cardinality)
+        all_t_shares = []
+        for s_ind in range(n_states):
+            s = dict(factor.assignment([s_ind])[0])
+            val = factor.get_value(**s)
+            all_t_shares.append(val)
+            cur_p = cur_query.get_value(**s)
+            if (val > max_state[0] and not math.isclose(val,max_state[0])) or (math.isclose(val,max_state[0]) and cur_p > max_state[1]):
+                max_state = (val,cur_p,s)
+            if min_state is None or (val < min_state[0] and not math.isclose(val,min_state[0])) or (math.isclose(val,min_state[0]) and cur_p < min_state[1]):
+                min_state = (val,cur_p)
+
+        # get max and min states factor probablities
+        t_shares = max_state[0]
+        p = max_state[1]
+        if math.isclose(max_state[0],min_state[0]):
+            return {'variables':max_state[2],"evidence":considered_evidence,"value":p}, funds0 + revert_fund(min_state[0], self._b)
+        # transformed shares from instataneos probability of max state,
+        #   (assuming that shares only max state moved probability)
+        tot_t_shares = (n_states - 1)*p/(1-p)
+        # new total transformed shares after max state liquidation
+        new_t_shares = max(tot_t_shares/t_shares,1) # can't be less than uniform distribution shares
+        # new probability of max state after liquidation
+        new_p = new_t_shares/(new_t_shares + n_states - 1)
+        # new transformed of min state after liquidation
+        new_rev_q = (1-new_p)/(1-p)
+        return {'variables':max_state[2],"evidence":considered_evidence,"value":new_p}, funds0 + revert_fund(min_state[0]*new_rev_q, self._b)
 
     def perform_edit(self, report, user_id=None):
         """
@@ -623,7 +593,7 @@ class PJTAmm():
         cur_jt = self._bp.junction_tree.copy()
         factor = factor_with_vars(vars_in_report, cur_jt)
         if factor is None:
-            raise Exception(f"No factor found with all variables in report for")
+            raise Exception("No factor found with all variables in report for")
 
         full_target_states, full_other_var_states_with_evidence, full_other_states, \
             other_var_states, report_variables = \
@@ -645,7 +615,8 @@ class PJTAmm():
         for o in other_var_states:
             po = cached_prob(o)
             if po != 0:
-                possible_m.append((1 - p_target) / (1 - x_target) * ((1 - p_target) / po))
+                possible_m.append((1 - p_target) / (1 - x_target) * (1 - p_target) / po )
+                # possible_m.append((1 - p_target) / (1 - x_target) * po)
         m = max(possible_m)
 
         factor_mods = {}
@@ -654,10 +625,12 @@ class PJTAmm():
         for s in full_other_var_states_with_evidence:
             kr = {k: v for k, v in s.items() if k in report_variables}
             po = cached_prob(kr)
-            factor_mods[clique_tup(s.items())] = (1 - x_target) / (1 - p_target) * ((po) / (1 - p_target))
+            factor_mods[clique_tup(s.items())] = (1 - x_target) / (1 - p_target)
+            # factor_mods[clique_tup(s.items())] = (1 - x_target) / (1 - p_target) * (po)
         for s in full_other_states:
             factor_mods[clique_tup(s.items())] = 1
 
+        # Edit user JT if us
         modify_factor(factor, factor_mods, m)
 
         bp = BeliefPropagation(cur_jt)
@@ -665,8 +638,7 @@ class PJTAmm():
 
         # Edit user JT if user_id is provided
         if user_id is not None:
-            user_jt = self.get_user_jt(user_id)
-            funds0 = self.get_user_free_funds(user_id)
+            user_jt = self.get_user_jt(user_id).copy()
 
             user_factor = factor_with_vars(vars_in_report, user_jt)
             if user_factor is None:
@@ -676,7 +648,17 @@ class PJTAmm():
 
             modify_factor(user_factor, factor_mods, 1)
 
-            min_q = min(user_factor.values.flatten())
+            all_values = user_factor.values.flatten()
+            shares = {}
+            for s_ind in range(math.prod(user_factor.cardinality)):
+                s = user_factor.assignment([s_ind])[0]
+                val = user_factor.get_value(**dict(s))
+                if val > 1:
+                    shares[tuple(s)] = revert_fund(val, self._b)
+                elif val < 1:
+                    shares[tuple(s)] = revert_fund(val, self._b)
+            print(f"{shares=}")
+            min_q = min(all_values)
             if min_q < 1:
                 # get funds from free funds
                 needed_funds = -revert_fund(min_q, self._b)
