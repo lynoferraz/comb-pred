@@ -18,6 +18,11 @@ def factor_with_vars(vars, j):
     if len(possible_fs) > 0: return min(possible_fs,key=lambda c:len(c.variables))
     return None
 
+def get_original_node(j,c):
+    for n in j.nodes:
+        if set(c) == set(n):
+            return n
+
 def factor_with_most_vars(vars, j):
     factor_dict = {}
     for f in j.get_factors():
@@ -74,46 +79,60 @@ def enumerate_states(report, factor):
     #
     other_var_states_with_evidence = []
     other_states = []
-    for e in evidence_vars:
-        target_state[e] = report["evidence"][e]
-        # Add evidence to other_var_states
-        for ovs in other_var_states:
-            ovs_copy = ovs.copy()
-            ovs_copy[e] = report["evidence"][e]
-            other_var_states_with_evidence.append(ovs_copy)
-        for s in wf.state_names[e]:
-            if s != report["evidence"][e]:
-                for prod in itertools.product(*[wf.state_names[v] for v in report_variables]):
-                    state = {e: s}
-                    for idx, v in enumerate(report_variables):
-                        state[v] = prod[idx]
-                    other_states.append(state)
     full_target_states = []
     full_other_var_states_with_evidence = []
     full_other_states = []
-    if len(vars_not_in_report) == 0:
-        full_target_states = [target_state]
-        full_other_var_states_with_evidence = other_var_states_with_evidence
-        full_other_states = other_states
-    else:
+    if len(evidence_vars) == 0:
         for prod in itertools.product(*[factor.state_names[ov] for ov in vars_not_in_report]):
             # target states
             t = target_state.copy()
             for idx, ov in enumerate(vars_not_in_report):
                 t[ov] = prod[idx]
             full_target_states.append(t)
-            # other_var_states_with_evidence
-            for oe in other_var_states_with_evidence:
-                foe = oe.copy()
-                for idx, ov in enumerate(vars_not_in_report):
-                    foe[ov] = prod[idx]
-                full_other_var_states_with_evidence.append(foe)
             # other_states
-            for oss in other_states:
+            for oss in other_var_states:
                 fos = oss.copy()
                 for idx, ov in enumerate(vars_not_in_report):
                     fos[ov] = prod[idx]
                 full_other_states.append(fos)
+    else:
+        for e in evidence_vars:
+            target_state[e] = report["evidence"][e]
+            # Add evidence to other_var_states
+            for ovs in other_var_states:
+                ovs_copy = ovs.copy()
+                ovs_copy[e] = report["evidence"][e]
+                other_var_states_with_evidence.append(ovs_copy)
+            for s in wf.state_names[e]:
+                if s != report["evidence"][e]:
+                    for prod in itertools.product(*[wf.state_names[v] for v in report_variables]):
+                        state = {e: s}
+                        for idx, v in enumerate(report_variables):
+                            state[v] = prod[idx]
+                        other_states.append(state)
+        if len(vars_not_in_report) == 0:
+            full_target_states = [target_state]
+            full_other_var_states_with_evidence = other_var_states_with_evidence
+            full_other_states = other_states
+        else:
+            for prod in itertools.product(*[factor.state_names[ov] for ov in vars_not_in_report]):
+                # target states
+                t = target_state.copy()
+                for idx, ov in enumerate(vars_not_in_report):
+                    t[ov] = prod[idx]
+                full_target_states.append(t)
+                # other_var_states_with_evidence
+                for oe in other_var_states_with_evidence:
+                    foe = oe.copy()
+                    for idx, ov in enumerate(vars_not_in_report):
+                        foe[ov] = prod[idx]
+                    full_other_var_states_with_evidence.append(foe)
+                # other_states
+                for oss in other_states:
+                    fos = oss.copy()
+                    for idx, ov in enumerate(vars_not_in_report):
+                        fos[ov] = prod[idx]
+                    full_other_states.append(fos)
     return full_target_states, full_other_var_states_with_evidence, full_other_states, other_var_states, report_variables
 
 def modify_factor(factor, factor_mods, m):
@@ -197,7 +216,7 @@ def get_jt_update_instructions(
         if len(existing_cliques_to_add) > 1:
             for c in existing_cliques_to_add:
                 has_neighbor = False
-                for n in jt.neighbors(c):
+                for n in jt.neighbors(get_original_node(jt,c)):
                     no = clique_tup(n)
                     if no in existing_cliques_to_add:
                         has_neighbor = True
@@ -222,7 +241,7 @@ def get_jt_update_instructions(
         if original_clique in existing_cliques_to_add:
             map_clique_add.setdefault(original_clique,{})[variable] = new_var_states
             new_c.add(variable)
-        neighbors = list(jt.neighbors(original_clique))
+        neighbors = list(jt.neighbors(get_original_node(jt,original_clique)))
         if len(new_c) == 0 and len(neighbors) == 1: # leaf
             # print(f"  skipping leaf clique")
             leaf_cliques.append(original_clique)
@@ -239,7 +258,7 @@ def get_jt_update_instructions(
             if original_n in leaf_cliques:
                 # print(f"    skipping leaf neighbor")
                 continue
-            if len(new_n) == 0 and len(list(jt.neighbors(no))):
+            if len(new_n) == 0 and len(list(jt.neighbors(get_original_node(jt,no)))):
                 # print(f"    skipping leaf neighbor (tbd)")
                 continue
             if len(new_n & new_c) == 0 and \
@@ -262,7 +281,7 @@ def get_jt_update_instructions(
         tg_c = None
         dummies_in_clique = []
         # print(f"dummy clique {c} -> {old_to_new_cliques[c]}")
-        for nc in jt.neighbors(c):
+        for nc in jt.neighbors(get_original_node(jt,c)):
             # print(f"  evaluating {nc} -> {old_to_new_cliques[nc]}")
             if tg_c is None:
                 if old_to_new_cliques.get(nc) is not None:
@@ -315,7 +334,7 @@ def get_jt_update_instructions(
     # Edge construction
     for c in old_to_new_cliques.keys():
         if c in map_clique_add and c not in existing_cliques_to_add: continue
-        for n in jt.neighbors(c):
+        for n in jt.neighbors(get_original_node(jt,c)):
             new_c = old_to_new_cliques[c]
             new_n = old_to_new_cliques.get(n)
             # remove dummy or self loop
@@ -423,8 +442,8 @@ class PJTAmm():
 
     def initialize(self, jt, b):
         total_funds_required = b*sum([math.log(card) for card in jt.get_cardinality().values()])
-        if total_funds_required > self._amm_balance:
-            raise Exception(f"AMM has not enough balance to initialize ({self._amm_balance} >= ({total_funds_required})")
+        if total_funds_required > self.get_amm_balance():
+            raise Exception(f"AMM has not enough balance to initialize ({self.get_amm_balance()} >= ({total_funds_required})")
         self._bp = BeliefPropagation(jt)
         self._bp.calibrate()
         self._b = b
@@ -435,35 +454,49 @@ class PJTAmm():
         user_jt = self._user_jts.get(user_id)
         if user_jt is None:
             user_jt = JunctionTree()
-            user_jt.add_edges_from(self._bp.junction_tree.edges())
-            new_factors = [
-                DiscreteFactor(sorted(f.variables), f.cardinality, [1] * math.prod(f.cardinality))
-                for f in self._bp.junction_tree.get_factors()
-            ]
+            edges = list(self._bp.junction_tree.edges())
+            if edges:
+                user_jt.add_edges_from(edges)
+            else:
+                for node in self._bp.junction_tree.nodes():
+                    user_jt.add_node(node)
+            new_factors = []
+            for f in self._bp.junction_tree.get_factors():
+                sorted_pairs = sorted(zip(f.variables, f.cardinality), key=lambda x: x[0])
+                sorted_vars = [v for v, _ in sorted_pairs]
+                sorted_card = [c for _, c in sorted_pairs]
+                new_factors.append(DiscreteFactor(sorted_vars, sorted_card, [1] * math.prod(f.cardinality)))
             user_jt.add_factors(*new_factors)
             self._user_jts[user_id] = user_jt
         return user_jt
 
-    def deposit_amm(self, delta):
-        if delta < 0:
-            raise Exception("Deposit amount must be non-negative")
-        self._amm_balance += delta
-
-    def get_user_free_funds(self, user_id):
+    # Basic ledger
+    def _get_amm_balance(self):
+        return self._amm_balance
+    def _get_user_free_funds(self, user_id):
         return self._user_free_funds.get(user_id, 0.0)
-
     def _update_amm_balance(self, delta):
         new_funds = self._amm_balance + delta
         if new_funds < 0:
             raise Exception(f"Insufficient AMM funds ({self._amm_balance} + ({delta}) = {new_funds})")
         self._amm_balance = new_funds
-
     def _update_user_balance(self, user_id, delta):
         user_funds = self._user_free_funds.get(user_id, 0)
         new_funds = user_funds + delta
         if new_funds < 0:
             raise Exception(f"Insufficient user funds ({user_funds} + ({delta}) = {new_funds})")
         self._user_free_funds[user_id] = new_funds
+
+    def get_user_free_funds(self, user_id):
+        return self._get_user_free_funds(user_id)
+
+    def get_amm_balance(self):
+        return self._get_amm_balance()
+
+    def deposit_amm(self, delta):
+        if delta < 0:
+            raise Exception("Deposit amount must be non-negative")
+        self._update_amm_balance(delta)
 
     def deposit_funds(self, user_id, delta):
         if delta < 0:
@@ -478,23 +511,21 @@ class PJTAmm():
     def _transfer_to_amm(self, user_id, delta):
         if delta < 0:
             raise Exception("Amount must be non-negative")
-        new_amm_funds = self._amm_balance + delta
-        user_funds = self._user_free_funds.get(user_id, 0)
+        user_funds = self.get_user_free_funds(user_id)
         new_user_funds = user_funds - delta
         if new_user_funds < 0:
             raise Exception(f"Insufficient user funds ({user_funds} - {delta} = {new_user_funds})")
-        self._user_free_funds[user_id] = new_user_funds
-        self._amm_balance = new_amm_funds
+        self._update_user_balance(user_id, - delta)
+        self._update_amm_balance(delta)
 
     def _transfer_from_amm(self, user_id, delta):
         if delta < 0:
             raise Exception("Amount must be non-negative")
-        new_amm_funds = self._amm_balance - delta
+        new_amm_funds = self.get_amm_balance() - delta
         if new_amm_funds < 0:
-            raise Exception(f"Insufficient AMM funds ({self._amm_balance} - {delta} = {new_amm_funds})")
-        new_user_funds = self._user_free_funds.get(user_id, 0) + delta
-        self._user_free_funds[user_id] = new_user_funds
-        self._amm_balance = new_amm_funds
+            raise Exception(f"Insufficient AMM funds ({self.get_amm_balance()} - {delta} = {new_amm_funds})")
+        self._update_user_balance(user_id, delta)
+        self._update_amm_balance(-delta)
 
     def query(self, variables, evidence={}, user_id=None):
         if not self._initialized: raise Exception("AMM not initialized")
@@ -515,7 +546,6 @@ class PJTAmm():
             return factor
         return self._bp.query(variables=list(variables), evidence=evidence)
 
-    # TODO: check why liquidation doesnt give max profit
     def simulate_liquidation(self, user_id, variables, evidence={}):
         if not self._initialized: raise Exception("AMM not initialized")
 
@@ -567,7 +597,7 @@ class PJTAmm():
         new_rev_q = (1-new_p)/(1-p)
         return {'variables':max_state[2],"evidence":considered_evidence,"value":new_p}, funds0 + revert_fund(min_state[0]*new_rev_q, self._b)
 
-    def perform_edit(self, report, user_id=None):
+    def perform_edit(self, report, user_id=None, fund_threshold=None):
         """
         Perform an edit operation on both the global and user-specific junction trees.
         If user_id is provided, edits are applied to both self._bp.junction_tree and self._user_jts[user_id].
@@ -622,13 +652,20 @@ class PJTAmm():
         factor_mods = {}
         for s in full_target_states:
             factor_mods[clique_tup(s.items())] = x_target / p_target
-        for s in full_other_var_states_with_evidence:
-            kr = {k: v for k, v in s.items() if k in report_variables}
-            po = cached_prob(kr)
-            factor_mods[clique_tup(s.items())] = (1 - x_target) / (1 - p_target)
-            # factor_mods[clique_tup(s.items())] = (1 - x_target) / (1 - p_target) * (po)
-        for s in full_other_states:
-            factor_mods[clique_tup(s.items())] = 1
+        if len(full_other_var_states_with_evidence) > 0:
+            for s in full_other_var_states_with_evidence:
+                kr = {k: v for k, v in s.items() if k in report_variables}
+                po = cached_prob(kr)
+                factor_mods[clique_tup(s.items())] = (1 - x_target) / (1 - p_target)
+                # factor_mods[clique_tup(s.items())] = (1 - x_target) / (1 - p_target) * (po)
+            for s in full_other_states:
+                factor_mods[clique_tup(s.items())] = 1
+        else:
+            for s in full_other_states:
+                kr = {k: v for k, v in s.items() if k in report_variables}
+                po = cached_prob(kr)
+                factor_mods[clique_tup(s.items())] = (1 - x_target) / (1 - p_target)
+                # factor_mods[clique_tup(s.items())] = (1 - x_target) / (1 - p_target) * (po)
 
         # Edit user JT if us
         modify_factor(factor, factor_mods, m)
@@ -636,40 +673,44 @@ class PJTAmm():
         bp = BeliefPropagation(cur_jt)
         bp.calibrate()
 
+        shares = {}
         # Edit user JT if user_id is provided
         if user_id is not None:
             user_jt = self.get_user_jt(user_id).copy()
 
             user_factor = factor_with_vars(vars_in_report, user_jt)
             if user_factor is None:
-                raise Exception(f"No user_factor found with all variables in report for")
+                raise Exception("No user_factor found with all variables in report for")
 
             min_q_before = min(user_factor.values.flatten())
 
             modify_factor(user_factor, factor_mods, 1)
 
             all_values = user_factor.values.flatten()
-            shares = {}
             for s_ind in range(math.prod(user_factor.cardinality)):
                 s = user_factor.assignment([s_ind])[0]
                 val = user_factor.get_value(**dict(s))
-                if val > 1:
+                if not math.isclose(val,0):
                     shares[tuple(s)] = revert_fund(val, self._b)
-                elif val < 1:
-                    shares[tuple(s)] = revert_fund(val, self._b)
-            print(f"{shares=}")
+            # print(f"{shares=}")
             min_q = min(all_values)
-            if min_q < 1:
+            if math.isclose(min_q,1):
+                # nothing changed
+                pass
+            elif min_q < 1:
                 # get funds from free funds
                 needed_funds = -revert_fund(min_q, self._b)
+                if fund_threshold is not None and needed_funds < fund_threshold:
+                    raise Exception(f"funds needed {needed_funds} more than maximum cost {fund_threshold}")
                 self._transfer_to_amm(user_id, needed_funds)
                 q_transfered_funds = transform_fund(needed_funds, self._b)
                 user_factor.product(q_transfered_funds)
-                # TODO: Solve float approx error
-            elif min_q_before <= 1 and min_q > 1:
+            elif math.isclose(min_q_before,1) and min_q > 1:
                 # get new global min
                 # return funds to user
                 returned_funds = revert_fund(min_q, self._b)
+                if fund_threshold is not None and returned_funds < fund_threshold:
+                    raise Exception(f"funds returned {returned_funds} less than minimum tolerated {fund_threshold}")
                 self._transfer_from_amm(user_id, returned_funds)
                 q_returned_funds = transform_fund(returned_funds, self._b)
                 user_factor.product(1/q_returned_funds)
@@ -693,7 +734,7 @@ class PJTAmm():
             self._user_jts[user_id] = user_jt
             self._bp = bp
 
-        return bp
+        return bp, shares
 
     def get_edit_bounds(self, report, user_id):
         """
@@ -759,7 +800,7 @@ class PJTAmm():
         # print(f"Total {user_expected_assets} + {cur_funds0} = {user_expected_assets + cur_funds0}")
         return user_expected_assets + cur_funds0
 
-    def get_edit_cost_delta(self, report, user_id):
+    def get_edit_deltas(self, report, user_id):
         """
         Returns the expected value of the user's assets.
         """
@@ -776,17 +817,21 @@ class PJTAmm():
 
         min_value_before = None
         min_value = None
+        revenue_value_before = 1
+        revenue_value = 1
         for s in cur_factor.assignment(range(math.prod(cur_factor.cardinality))):
             s_dict = dict(s)
             evidence = report.get('evidence',{})
             if evidence is None or all(s_dict.get(k) == v for k, v in report.get('evidence',{}).items()):
                 value = cur_factor.get_value(**s_dict)
-                if all(s_dict.get(k) == v for k, v in report['variables'].items()):
+                if all(s_dict.get(k) == v for k, v in report.get('variables',{}).items()):
                     n_value = value * x_target / p_target
                     if min_value_before is None or n_value < min_value_before:
                         min_value_before = value
                     if min_value is None or value < min_value:
                         min_value = n_value
+                    revenue_value_before = value
+                    revenue_value = n_value
                 else:
                     kr = {k: v for k, v in s if k in report['variables']}
                     po = prob_fn.get_value(**kr)
@@ -796,10 +841,11 @@ class PJTAmm():
                     if min_value is None or n_value < min_value:
                         min_value = n_value
 
+        revenue = revert_fund(revenue_value/revenue_value_before, self._b)
         if min_value < 1:
             # get funds from free funds
-            return revert_fund(min_value, self._b)
-        return revert_fund(min_value/min_value_before, self._b)
+            return revert_fund(min_value, self._b), revenue
+        return revert_fund(min_value/min_value_before, self._b), revenue
 
     def perform_resolve(self, resolve):
         """
@@ -822,8 +868,11 @@ class PJTAmm():
             user_jt_updates = {}
             for user_id, user_jt in self._user_jts.items():
                 new_user_jt, q_returned_funds = resolve_jt(user_jt, map_clique_resolve, {}, new_edges, old_to_new_cliques)
+                if math.isclose(q_returned_funds,1):
+                    continue
                 user_jt_updates[user_id] = new_user_jt
-                if q_returned_funds < 1: raise Exception(f"User {user_id} has insufficient funds to resolve {resolve}")
+                if q_returned_funds < 1:
+                    raise Exception(f"User {user_id} has insufficient funds to resolve {resolve}")
                 if q_returned_funds > 1:
                     returned_funds = revert_fund(q_returned_funds, self._b)
                     self._transfer_from_amm(user_id, returned_funds)
@@ -834,7 +883,7 @@ class PJTAmm():
             self._bp = bp
             for user_id, new_user_jt in user_jt_updates.items():
                 self._user_jts[user_id] = new_user_jt
-            return bp
+            return bp, user_jt_updates.keys()
         # except Exception as e:
         #     # logger.error(f"Failed to resolve {resolve}: {e}")
         #     raise
@@ -848,8 +897,8 @@ class PJTAmm():
 
         total_funds_required = self._b*sum([math.log(card) for card in self._bp.junction_tree.get_cardinality().values()])
         total_funds_required = self._b*math.log(new_var_states)
-        if total_funds_required > self._amm_balance:
-            raise Exception(f"AMM has not enough balance to initialize ({self._amm_balance} >= ({total_funds_required})")
+        if total_funds_required > self.get_amm_balance():
+            raise Exception(f"AMM has not enough balance to initialize ({self.get_amm_balance()} >= ({total_funds_required})")
 
         map_clique_resolve, map_clique_add, new_edges, old_to_new_cliques = \
             get_add_variable_instructions(self._bp.junction_tree, new_var, new_var_states, cliques_to_add)

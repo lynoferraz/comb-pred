@@ -1,29 +1,56 @@
 # CIM - Combinatorial Information Markets project
 
-This project implements a prediction market marketplace based in the concept of [Combinatorial Information Market](https://mason.gmu.edu/~rhanson/combobet.pdf) 
+```
+Cartesi Rollups Node version: 2.1.x
+```
 
-# Setup
+This project implements a prediction market marketplace based in the concept of [Combinatorial Information Market](https://mason.gmu.edu/~rhanson/combobet.pdf)
 
-This project uses pipenv. First install it:
+## Requirements
 
-(Ubuntu)
-```sudo apt install pipenv```
+- [cartesapp](https://github.com/prototyp3-dev/cartesapp/), an high level framwork for python cartesi rollup app
 
-Clone the repository
-(using ssh)
-```git clone git@github.com:prototyp3-dev/cim.git```
+## Instructions
 
-Enter the repository
-```cd cim```
+Install Cartesapp:
 
-Install dependencies using pipenv
-```pipenv install```
+```shell
+python3 -m venv .venv
+. .venv/bin/activate
+pip3 install cartesapp[dev]@git+https://github.com/prototyp3-dev/cartesapp@v1.2.3
+```
 
-Activate the environment
-```pipenv shell```
+## Setup
 
-Run the development Jupyter Notebook
-```jupyter-lab```
+Set the `ADMIN_ADDRESS` on the cartesi.toml file under the `[machine]`section:
+
+```shell
+envs = ["ADMIN_ADDRESS=0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"]
+```
+
+## Running
+
+Run the App environment with:
+
+```shell
+cartesapp node
+```
+
+### Running Backend in dev mode
+
+To run the backend in dev mode and speedup the development process you should run
+
+```shell
+cartesapp node --dev
+```
+
+## Building
+
+Build backend with:
+
+```shell
+cartesapp build
+```
 
 # References
 

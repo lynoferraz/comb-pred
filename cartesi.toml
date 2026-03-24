@@ -1,0 +1,26 @@
+[machine]
+ram_length = "1024Mi"
+user = "root"
+workdir = "/mnt/app"
+entrypoint = "/usr/local/bin/run_cartesapp"
+envs = ["ADMIN_ADDRESS=0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"]
+
+[drives.root]
+builder = "docker"
+dockerfile = "rootfs.dockerfile"
+format = "ext2"
+extra_size = "64Mb"
+avoid_overwrite = "true"
+#buildx = "true"
+
+[drives.app]
+builder = "directory"
+directory = "./cim"
+format = "sqfs"
+mount = "/mnt/app/cim"
+
+[drives.data]
+builder = "empty"
+size = "128Mb"
+format = "ext2"
+user = "dapp"
