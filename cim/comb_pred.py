@@ -50,6 +50,7 @@ class AddVariablePayload(BaseModel):
     resolve_address: Address
     related_aliases: List[Bytes32]
     related_aliases2: List[Bytes32]
+    related_aliases3: List[Bytes32]
     info_url: String
 
 class ResolveVariablePayload(BaseModel):
@@ -144,8 +145,7 @@ def emit_probability_updates(affected_aliases: list, tags: list, timestamp: int)
 ###
 # Mutations
 
-@mutation(
-    module_name='wallet', no_module_header=True,
+@mutation(no_module_header=True,
     msg_sender=ETHER_PORTAL_ADDRESS,
     no_header=True,
     packed=True,
@@ -237,6 +237,9 @@ def add_variable(payload: AddVariablePayload) -> bool:
         related2 = list(map(bytes32toStr,payload.related_aliases2))
         if len(related2) > 0:
             related.append(related2)
+        related3 = list(map(bytes32toStr,payload.related_aliases3))
+        if len(related3) > 0:
+            related.append(related3)
         cliques = related if len(related) > 0 else [None]
         Model().amm.perform_add(alias,payload.n_states,cliques)
     except Exception as e:

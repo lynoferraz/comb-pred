@@ -20,6 +20,11 @@ interface UserInfoData {
   expected: number;
 }
 
+interface ChartDataIface {
+  label: string;
+  values: number[];
+}
+
 export default function DashboardPage() {
   const { variables, graphNodes, config, walletAddress, appAddress } = useApp();
 
@@ -28,6 +33,7 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [chartData, setChartData] = useState<ChartDataIface[]>([]);
 
   const fetchUserInfo = useCallback(async () => {
     if (!appAddress || !walletAddress) return;
@@ -64,7 +70,6 @@ export default function DashboardPage() {
         },
         getInspectOptions(config),
       );
-      console.log("balances", result);
 
       const events: UserBalanceEvent[] = result.data
         .filter((d: any) => d.user !== undefined)
@@ -90,19 +95,23 @@ export default function DashboardPage() {
     }
   }, [walletAddress, appAddress, fetchUserInfo, fetchBalanceHistory]);
 
-  const chartData =
-    balanceHistory.length > 0
-      ? [
-          {
-            label: "Free Funds",
-            values: balanceHistory.map((e) => e.free_funds / 1e18),
-          },
-          {
-            label: "Expected",
-            values: balanceHistory.map((e) => e.expected / 1e18),
-          },
-        ]
-      : [];
+  useEffect(() => {
+    console.log("chart data", balanceHistory, chartData);
+    if (balanceHistory.length > 0) {
+      setChartData([
+        {
+          label: "Free Funds",
+          values: balanceHistory.map((e) => e.free_funds / 1e18),
+        },
+        {
+          label: "Expected",
+          values: balanceHistory.map((e) => e.expected / 1e18),
+        },
+      ]);
+    } else {
+      setChartData([]);
+    }
+  }, [balanceHistory]);
 
   const chartLabels = balanceHistory.map((e) =>
     e.timestamp > 0
@@ -120,7 +129,9 @@ export default function DashboardPage() {
         <div className="w-20 h-20 bg-slate-100 rounded-full flex items-center justify-center text-slate-300">
           <Wallet size={40} />
         </div>
-        <h2 className="text-xl font-black text-slate-900">Connect Your Wallet</h2>
+        <h2 className="text-xl font-black text-slate-900">
+          Connect Your Wallet
+        </h2>
         <p className="text-slate-400 max-w-xs font-medium">
           Connect your wallet to view your portfolio dashboard.
         </p>
@@ -134,15 +145,25 @@ export default function DashboardPage() {
         {/* Title */}
         <div className="flex justify-between items-center">
           <div>
-            <h2 className="text-2xl font-black text-slate-900 tracking-tight">Portfolio Dashboard</h2>
-            <p className="text-sm text-slate-500 font-medium">Your market positions and balance history.</p>
+            <h2 className="text-2xl font-black text-slate-900 tracking-tight">
+              Portfolio Dashboard
+            </h2>
+            <p className="text-sm text-slate-500 font-medium">
+              Your market positions and balance history.
+            </p>
           </div>
           <button
-            onClick={() => { fetchUserInfo(); fetchBalanceHistory(); }}
+            onClick={() => {
+              fetchUserInfo();
+              fetchBalanceHistory();
+            }}
             disabled={loading || historyLoading}
             className="flex items-center gap-1.5 px-4 py-2 rounded-xl border border-slate-200 text-xs font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-50 transition-colors"
           >
-            <RefreshCw size={14} className={loading || historyLoading ? "animate-spin" : ""} />
+            <RefreshCw
+              size={14}
+              className={loading || historyLoading ? "animate-spin" : ""}
+            />
             Refresh
           </button>
         </div>
@@ -152,27 +173,43 @@ export default function DashboardPage() {
           <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
             <div className="flex items-center gap-2 mb-2">
               <Activity size={14} className="text-slate-400" />
-              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Free Funds</span>
+              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                Free Funds
+              </span>
             </div>
             <div className="text-lg font-black text-slate-900">
-              {loading ? "..." : currentInfo ? (currentInfo.free_funds / 1e18).toFixed(6) + " ETH" : "-"}
+              {loading
+                ? "..."
+                : currentInfo
+                  ? (currentInfo.free_funds / 1e18).toFixed(6) + " ETH"
+                  : "-"}
             </div>
           </div>
           <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
             <div className="flex items-center gap-2 mb-2">
               <TrendingUp size={14} className="text-slate-400" />
-              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Expected Value</span>
+              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                Expected Value
+              </span>
             </div>
             <div className="text-lg font-black text-slate-900">
-              {loading ? "..." : currentInfo ? (currentInfo.expected / 1e18).toFixed(6) + " ETH" : "-"}
+              {loading
+                ? "..."
+                : currentInfo
+                  ? (currentInfo.expected / 1e18).toFixed(6) + " ETH"
+                  : "-"}
             </div>
           </div>
           <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
             <div className="flex items-center gap-2 mb-2">
               <Layers size={14} className="text-slate-400" />
-              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Balance Events</span>
+              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                Balance Events
+              </span>
             </div>
-            <div className="text-lg font-black text-slate-900">{balanceHistory.length}</div>
+            <div className="text-lg font-black text-slate-900">
+              {balanceHistory.length}
+            </div>
           </div>
         </div>
 
@@ -184,7 +221,9 @@ export default function DashboardPage() {
 
         {/* Chart */}
         <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
-          <h3 className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-6">Balance History</h3>
+          <h3 className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-6">
+            Balance History
+          </h3>
           {chartData.length > 0 ? (
             <SimpleChart
               title="Funds Evolution (ETH)"
@@ -201,7 +240,9 @@ export default function DashboardPage() {
             )
           )}
           {historyLoading && (
-            <div className="py-8 text-center text-slate-400 text-xs font-bold">Loading history...</div>
+            <div className="py-8 text-center text-slate-400 text-xs font-bold">
+              Loading history...
+            </div>
           )}
         </div>
 
@@ -209,7 +250,9 @@ export default function DashboardPage() {
         {balanceHistory.length > 0 && (
           <div className="bg-white border border-slate-200 rounded-3xl overflow-hidden shadow-sm">
             <div className="px-8 py-6 border-b border-slate-100 bg-slate-50/50">
-              <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest">Balance Events</h3>
+              <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest">
+                Balance Events
+              </h3>
             </div>
             <table className="w-full text-xs">
               <thead className="bg-slate-50/50 text-slate-400 uppercase text-[10px] font-black">
@@ -223,10 +266,16 @@ export default function DashboardPage() {
                 {[...balanceHistory].reverse().map((ev, i) => (
                   <tr key={i} className="hover:bg-slate-50 transition-colors">
                     <td className="px-8 py-5 text-slate-400 font-mono">
-                      {ev.timestamp > 0 ? new Date(ev.timestamp * 1000).toLocaleString() : "-"}
+                      {ev.timestamp > 0
+                        ? new Date(ev.timestamp * 1000).toLocaleString()
+                        : "-"}
                     </td>
-                    <td className="px-8 py-5 text-right text-slate-900 font-black">{(ev.free_funds / 1e18).toFixed(6)}</td>
-                    <td className="px-8 py-5 text-right text-slate-900 font-black">{(ev.expected / 1e18).toFixed(6)}</td>
+                    <td className="px-8 py-5 text-right text-slate-900 font-black">
+                      {(ev.free_funds / 1e18).toFixed(6)}
+                    </td>
+                    <td className="px-8 py-5 text-right text-slate-900 font-black">
+                      {(ev.expected / 1e18).toFixed(6)}
+                    </td>
                   </tr>
                 ))}
               </tbody>

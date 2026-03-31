@@ -192,6 +192,7 @@ def test_should_add_variable_var1(app_client: TestClient):
         resolve_address=ADMIN_ADDRESS,
         related_aliases=[],
         related_aliases2=[],
+        related_aliases3=[],
         info_url="https://example.com/var1",
     )
     hex_payload = app_client.input_helper.encode_mutation_input(add_variable, payload)
@@ -211,6 +212,7 @@ def test_should_add_variable_var2(app_client: TestClient):
         resolve_address=ADMIN_ADDRESS,
         related_aliases=[],
         related_aliases2=[],
+        related_aliases3=[],
         info_url="https://example.com/var2",
     )
     hex_payload = app_client.input_helper.encode_mutation_input(add_variable, payload)
@@ -226,6 +228,7 @@ def test_should_fail_add_duplicate_variable(app_client: TestClient):
         resolve_address=ADMIN_ADDRESS,
         related_aliases=[],
         related_aliases2=[],
+        related_aliases3=[],
         info_url="https://example.com/var1",
     )
     hex_payload = app_client.input_helper.encode_mutation_input(add_variable, payload)
@@ -241,6 +244,7 @@ def test_should_fail_add_too_many_states(app_client: TestClient):
         resolve_address=ADMIN_ADDRESS,
         related_aliases=[],
         related_aliases2=[],
+        related_aliases3=[],
         info_url="https://example.com/badvar",
     )
     hex_payload = app_client.input_helper.encode_mutation_input(add_variable, payload)

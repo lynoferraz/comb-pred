@@ -12,15 +12,30 @@ import {
   resolveVariable,
   setOperatorAddress,
 } from "../backend-libs/cim/lib";
-import { Settings, Shield, Plus, CheckCircle, RefreshCw, UserCog } from "lucide-react";
+import {
+  Settings,
+  Shield,
+  Plus,
+  CheckCircle,
+  RefreshCw,
+  UserCog,
+} from "lucide-react";
 
 export default function AdminPage() {
-  const { config, appAddress, walletAddress, walletClient, variables, infoMap } =
-    useApp();
+  const {
+    config,
+    appAddress,
+    walletAddress,
+    walletClient,
+    variables,
+    infoMap,
+  } = useApp();
 
   const [operatorAddr, setOperatorAddr] = useState<string>("");
   const [adminAddr, setAdminAddr] = useState<string>("");
-  const [configData, setConfigData] = useState<Record<string, any> | null>(null);
+  const [configData, setConfigData] = useState<Record<string, any> | null>(
+    null,
+  );
   const [queryLoading, setQueryLoading] = useState(false);
 
   const [mutationLoading, setMutationLoading] = useState(false);
@@ -33,6 +48,7 @@ export default function AdminPage() {
   const [nStates, setNStates] = useState("2");
   const [relatedAliases, setRelatedAliases] = useState("");
   const [relatedAliases2, setRelatedAliases2] = useState("");
+  const [relatedAliases3, setRelatedAliases3] = useState("");
   const [resolveAddr, setResolveAddr] = useState("");
   const [infoUrl, setInfoUrl] = useState("");
 
@@ -52,8 +68,12 @@ export default function AdminPage() {
     setQueryLoading(true);
     try {
       const [opResult, adResult, cfgResult] = await Promise.all([
-        fetchOperatorAddr({}, { ...inspectOpts, decodeModel: "hex" }).catch(() => null),
-        fetchAdminAddr({}, { ...inspectOpts, decodeModel: "hex" }).catch(() => null),
+        fetchOperatorAddr({}, { ...inspectOpts, decodeModel: "hex" }).catch(
+          () => null,
+        ),
+        fetchAdminAddr({}, { ...inspectOpts, decodeModel: "hex" }).catch(
+          () => null,
+        ),
         fetchConfig({}, inspectOpts).catch(() => null),
       ]);
       console.log("fetchQueries results", opResult, adResult, cfgResult);
@@ -117,14 +137,23 @@ export default function AdminPage() {
       .map((s) => s.trim())
       .filter(Boolean)
       .map(strToBytes32);
+    const related3 = relatedAliases3
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .map(strToBytes32);
     runMutation("Add Variable", () =>
       addVariable(
         {
           alias: strToBytes32(newAlias),
           n_states: BigInt(parseInt(nStates)),
-          resolve_address: resolveAddr || operatorAddr || "0x0000000000000000000000000000000000000000",
+          resolve_address:
+            resolveAddr ||
+            operatorAddr ||
+            "0x0000000000000000000000000000000000000000",
           related_aliases: related,
           related_aliases2: related2,
+          related_aliases3: related3,
           info_url: infoUrl,
         } as any,
         mutationOpts,
@@ -179,7 +208,9 @@ export default function AdminPage() {
         <p className="text-slate-400 max-w-xs font-medium">
           Only the operator wallet can access admin operations.
         </p>
-        <p className="text-slate-400 text-xs font-mono">Connected: {walletAddress}</p>
+        <p className="text-slate-400 text-xs font-mono">
+          Connected: {walletAddress}
+        </p>
       </div>
     );
   }
@@ -188,17 +219,24 @@ export default function AdminPage() {
     (v) => v.states_probs.length > 0 && !v.states_probs.some((p) => p === 1),
   );
 
-  const inputClass = "w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm focus:ring-2 ring-blue-500/10 outline-none";
-  const labelClass = "text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2";
-  const btnPrimaryClass = "bg-slate-900 hover:bg-black disabled:opacity-50 disabled:cursor-not-allowed text-white font-black py-3 px-6 rounded-2xl text-xs transition-all";
+  const inputClass =
+    "w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm focus:ring-2 ring-blue-500/10 outline-none";
+  const labelClass =
+    "text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2";
+  const btnPrimaryClass =
+    "bg-slate-900 hover:bg-black disabled:opacity-50 disabled:cursor-not-allowed text-white font-black py-3 px-6 rounded-2xl text-xs transition-all";
 
   return (
     <div className="max-w-4xl space-y-8 animate-in">
       {/* Title */}
       <div className="flex justify-between items-center">
         <div>
-          <h2 className="text-2xl font-black text-slate-900 tracking-tight">Admin Panel</h2>
-          <p className="text-sm text-slate-500 font-medium">Manage market configuration and variables.</p>
+          <h2 className="text-2xl font-black text-slate-900 tracking-tight">
+            Admin Panel
+          </h2>
+          <p className="text-sm text-slate-500 font-medium">
+            Manage market configuration and variables.
+          </p>
         </div>
         <button
           onClick={fetchQueries}
@@ -226,16 +264,22 @@ export default function AdminPage() {
       <div className="bg-white border border-slate-200 rounded-3xl overflow-hidden shadow-sm">
         <div className="px-8 py-6 border-b border-slate-100 bg-slate-50/50 flex items-center gap-2">
           <Settings size={14} className="text-slate-400" />
-          <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest">System Info</h3>
+          <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest">
+            System Info
+          </h3>
         </div>
         <div className="divide-y divide-slate-100">
           <div className="flex justify-between px-8 py-4 text-sm">
             <span className="text-slate-400 font-bold">Operator Address</span>
-            <span className="text-slate-900 font-mono text-xs">{operatorAddr || "-"}</span>
+            <span className="text-slate-900 font-mono text-xs">
+              {operatorAddr || "-"}
+            </span>
           </div>
           <div className="flex justify-between px-8 py-4 text-sm">
             <span className="text-slate-400 font-bold">Admin Address</span>
-            <span className="text-slate-900 font-mono text-xs">{adminAddr || "-"}</span>
+            <span className="text-slate-900 font-mono text-xs">
+              {adminAddr || "-"}
+            </span>
           </div>
           {configData &&
             Object.entries(configData).map(([key, val]) => (
@@ -253,7 +297,9 @@ export default function AdminPage() {
       <div className="bg-white border border-slate-200 rounded-3xl p-8 shadow-sm space-y-4">
         <div className="flex items-center gap-2 mb-2">
           <Settings size={14} className="text-slate-400" />
-          <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest">Initialize AMM</h3>
+          <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest">
+            Initialize AMM
+          </h3>
         </div>
         <div>
           <label className={labelClass}>b Parameter (ETH)</label>
@@ -280,7 +326,9 @@ export default function AdminPage() {
       <div className="bg-white border border-slate-200 rounded-3xl p-8 shadow-sm space-y-4">
         <div className="flex items-center gap-2 mb-2">
           <Plus size={14} className="text-slate-400" />
-          <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest">Add Variable</h3>
+          <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest">
+            Add Variable
+          </h3>
         </div>
         <div className="grid grid-cols-2 gap-4">
           <div>
@@ -315,9 +363,11 @@ export default function AdminPage() {
             className={inputClass}
           />
         </div>
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-3 gap-4">
           <div>
-            <label className={labelClass}>Related Aliases (comma-separated)</label>
+            <label className={labelClass}>
+              Related Aliases (comma-separated)
+            </label>
             <input
               type="text"
               value={relatedAliases}
@@ -327,12 +377,26 @@ export default function AdminPage() {
             />
           </div>
           <div>
-            <label className={labelClass}>Related Aliases 2 (comma-separated)</label>
+            <label className={labelClass}>
+              Related Aliases 2 (comma-separated)
+            </label>
             <input
               type="text"
               value={relatedAliases2}
               onChange={(e) => setRelatedAliases2(e.target.value)}
               placeholder="e.g. var4, var5"
+              className={inputClass}
+            />
+          </div>
+          <div>
+            <label className={labelClass}>
+              Related Aliases 3 (comma-separated)
+            </label>
+            <input
+              type="text"
+              value={relatedAliases3}
+              onChange={(e) => setRelatedAliases3(e.target.value)}
+              placeholder="e.g. var6, var7"
               className={inputClass}
             />
           </div>
@@ -360,7 +424,9 @@ export default function AdminPage() {
       <div className="bg-white border border-slate-200 rounded-3xl p-8 shadow-sm space-y-4">
         <div className="flex items-center gap-2 mb-2">
           <CheckCircle size={14} className="text-slate-400" />
-          <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest">Resolve Variable</h3>
+          <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest">
+            Resolve Variable
+          </h3>
         </div>
         <div className="grid grid-cols-2 gap-4">
           <div>
@@ -416,9 +482,13 @@ export default function AdminPage() {
         <div className="bg-white border border-slate-200 rounded-3xl p-8 shadow-sm space-y-4">
           <div className="flex items-center gap-2 mb-2">
             <UserCog size={14} className="text-slate-400" />
-            <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest">Set Operator Address</h3>
+            <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest">
+              Set Operator Address
+            </h3>
           </div>
-          <p className="text-sm text-slate-500">Only the admin address can change the operator.</p>
+          <p className="text-sm text-slate-500">
+            Only the admin address can change the operator.
+          </p>
           <div>
             <label className={labelClass}>New Operator Address</label>
             <input

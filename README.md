@@ -1,7 +1,7 @@
 # CIM - Combinatorial Information Markets project
 
 ```
-Cartesi Rollups Node version: 2.1.x
+Cartesi Rollups Node version: 2.x
 ```
 
 This project implements a prediction market marketplace based in the concept of [Combinatorial Information Market](https://mason.gmu.edu/~rhanson/combobet.pdf)
@@ -17,7 +17,7 @@ Install Cartesapp:
 ```shell
 python3 -m venv .venv
 . .venv/bin/activate
-pip3 install cartesapp[dev]@git+https://github.com/prototyp3-dev/cartesapp@v1.2.3
+pip3 install cartesapp[dev]@git+https://github.com/prototyp3-dev/cartesapp@v1.2.4
 ```
 
 ## Setup

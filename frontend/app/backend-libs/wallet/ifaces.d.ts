@@ -6,42 +6,17 @@
  */
 
 export interface _Master_ {
-  WalletBalance: WalletBalance;
-  Erc721Event: Erc721Event;
-  WithdrawEtherPayload: WithdrawEtherPayload;
   EtherEvent: EtherEvent;
   Erc1155Event: Erc1155Event;
+  WalletBalance: WalletBalance;
   WithdrawErc20Voucher: WithdrawErc20Voucher;
   WithdrawErc1155BatchVoucher: WithdrawErc1155BatchVoucher;
   WithdrawErc721Voucher: WithdrawErc721Voucher;
   TransferEtherPayload: TransferEtherPayload;
   Erc20Event: Erc20Event;
   WithdrawErc1155SingleVoucher: WithdrawErc1155SingleVoucher;
-}
-export interface WalletBalance {
-  ether?: number | null;
-  erc20?: {
-    [k: string]: number;
-  } | null;
-  erc721?: {
-    [k: string]: number[];
-  } | null;
-  erc1155?: {
-    [k: string]: {
-      [k: string]: number;
-    };
-  } | null;
-}
-export interface Erc721Event {
-  timestamp: number;
-  user: string;
-  address: string;
-  mod_id: number;
-  ids: number[];
-}
-export interface WithdrawEtherPayload {
-  amount: number;
-  exec_layer_data: string;
+  Erc721Event: Erc721Event;
+  WithdrawEtherPayload: WithdrawEtherPayload;
 }
 export interface EtherEvent {
   timestamp: number;
@@ -57,6 +32,20 @@ export interface Erc1155Event {
   mod_amounts: number[];
   ids: number[];
   amounts: number[];
+}
+export interface WalletBalance {
+  ether?: number | null;
+  erc20?: {
+    [k: string]: number;
+  } | null;
+  erc721?: {
+    [k: string]: number[];
+  } | null;
+  erc1155?: {
+    [k: string]: {
+      [k: string]: number;
+    };
+  } | null;
 }
 export interface WithdrawErc20Voucher {
   user: string;
@@ -92,4 +81,15 @@ export interface WithdrawErc1155SingleVoucher {
   id: number;
   amount: number;
   data: string;
+}
+export interface Erc721Event {
+  timestamp: number;
+  user: string;
+  address: string;
+  mod_id: number;
+  ids: number[];
+}
+export interface WithdrawEtherPayload {
+  amount: number;
+  exec_layer_data: string;
 }

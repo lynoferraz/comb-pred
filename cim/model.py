@@ -6,7 +6,7 @@ from cartesapp.setup import post_setup
 from cartesapplib.wallet import app_wallet
 
 from .core_settings import CoreSettings
-from .auto_market_maker import PJTAmm
+from .auto_market_maker import ABAmm
 from .jt_serializer import save_amm_state, load_amm_state
 
 def _get_amm_balance() -> float:
@@ -33,7 +33,7 @@ class Model:
     def __new__(cls):
         # load configuration on reder node
         if not cls.initialized:
-            cls.amm = PJTAmm()
+            cls.amm = ABAmm()
             cls.amm._get_amm_balance = _get_amm_balance
             cls.amm._get_user_free_funds = _get_user_free_funds
             cls.amm._update_amm_balance = _update_amm_balance
@@ -45,10 +45,6 @@ class Model:
     def store(cls):
         if Storage.STORAGE_PATH is not None:
             save_amm_state(get_amm_dir(), cls.amm)
-            cls.amm._get_amm_balance = _get_amm_balance
-            cls.amm._get_user_free_funds = _get_user_free_funds
-            cls.amm._update_amm_balance = _update_amm_balance
-            cls.amm._update_user_balance = _update_user_balance
 
     @classmethod
     def load(cls):
@@ -56,6 +52,10 @@ class Model:
             amm_dir = get_amm_dir()
             if os.path.exists(os.path.join(amm_dir, "amm_meta.json")):
                 load_amm_state(amm_dir, cls.amm)
+                cls.amm._get_amm_balance = _get_amm_balance
+                cls.amm._get_user_free_funds = _get_user_free_funds
+                cls.amm._update_amm_balance = _update_amm_balance
+                cls.amm._update_user_balance = _update_user_balance
 
 @post_setup()
 def store_core_settings():

@@ -1,5 +1,5 @@
 """
-Unit tests for PJTAmm (Probabilistic Junction Tree Automated Market Maker).
+Unit tests for ABAmm (Probabilistic Junction Tree Automated Market Maker).
 Tests the core AMM logic without the cartesapp framework.
 """
 import math
@@ -8,12 +8,25 @@ import pytest
 from pgmpy.models import JunctionTree
 from pgmpy.factors.discrete import DiscreteFactor
 
-from cim.auto_market_maker import PJTAmm, create_dummy_factor, dummy_name, transform_fund, revert_fund
+def fix_import_path(libpath):
+    import os
+    import sys
+    libabsdir = os.path.abspath(libpath)
+    sys.path.insert(0,libabsdir)
+
+def get_script_dir():
+    import os
+    import inspect
+    currentdir = os.path.dirname(os.path.abspath(inspect.stack()[1].filename))
+    return currentdir
+
+fix_import_path(f"{get_script_dir()}/..")
+from cim.auto_market_maker import ABAmm, create_dummy_factor, dummy_name, transform_fund, revert_fund
 
 
 def fresh_amm():
-    """Create a PJTAmm with clean instance-level state (avoids class-level dict sharing)."""
-    amm = PJTAmm()
+    """Create a ABAmm with clean instance-level state (avoids class-level dict sharing)."""
+    amm = ABAmm()
     amm._user_jts = {}
     amm._user_free_funds = {}
     return amm
@@ -71,9 +84,9 @@ class TestFundTransforms:
         assert revert_fund(1, 72) == 0.0
 
 
-# --- PJTAmm initialization and basic ledger ---
+# --- Amm initialization and basic ledger ---
 
-class TestPJTAmmInit:
+class TestAmmInit:
     def test_not_initialized_raises(self):
         amm = fresh_amm()
         with pytest.raises(Exception, match="not initialized"):
@@ -97,7 +110,7 @@ class TestPJTAmmInit:
 
 # --- Deposit and withdrawal ---
 
-class TestPJTAmmFunds:
+class TestAmmFunds:
     def test_deposit_amm(self):
         amm = fresh_amm()
         amm.deposit_amm(500)
@@ -144,7 +157,7 @@ class TestPJTAmmFunds:
 
 # --- Full workflow: initialize → add → edit → resolve ---
 
-class TestPJTAmmWorkflow:
+class TestAmmWorkflow:
     @pytest.fixture()
     def amm(self):
         """Set up an AMM with the Asia JT, one user with funds."""
@@ -270,7 +283,7 @@ class TestPJTAmmWorkflow:
 
 # --- perform_add ---
 
-class TestPJTAmmAdd:
+class TestAmmAdd:
     @pytest.fixture()
     def amm(self):
         amm = fresh_amm()
@@ -320,7 +333,7 @@ class TestPJTAmmAdd:
 
 # --- Edge cases ---
 
-class TestPJTAmmEdgeCases:
+class TestAmmEdgeCases:
     def test_edit_invalid_value_raises(self):
         amm = fresh_amm()
         jt = make_asia_jt()

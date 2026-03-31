@@ -256,7 +256,7 @@ export default function QueryPanel({
 
       // Extract old probability: find the row matching selected var+evidence states
       if (qr.probabilities?.length > 0) {
-        const allSelections = [...varSelections, ...evidenceSelections];
+        const allSelections = varSelections;
         const matchingRow = qr.probabilities.find((row) =>
           allSelections.every((sel) => row[sel.alias] === sel.state),
         );
@@ -648,7 +648,7 @@ export default function QueryPanel({
                   {result.user_liquidation && (
                     <div className="flex justify-between items-center text-[10px] font-mono">
                       <span className="text-slate-400">
-                        Expected Free Funds
+                        Balance on Liquidation (w. sel. vars)
                       </span>
                       <span className="text-emerald-600 font-bold">
                         {formatEth(result.user_liquidation.expected_free_funds)}
@@ -688,7 +688,7 @@ export default function QueryPanel({
                 </label>
                 <input
                   type="number"
-                  step="0.001"
+                  step="0.000001"
                   min="0"
                   max="1"
                   value={value}
@@ -703,11 +703,11 @@ export default function QueryPanel({
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1.5">
                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">
-                      Virtual Share
+                      Virtual Share Delta
                     </label>
                     <input
                       type="number"
-                      step="0.00001"
+                      step="0.000001"
                       value={currentVS !== null ? currentVS.toFixed(6) : ""}
                       onChange={(e) => handleVSChange(e.target.value)}
                       placeholder="b·ln(p/p₀)"
@@ -716,11 +716,11 @@ export default function QueryPanel({
                   </div>
                   <div className="space-y-1.5">
                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">
-                      Cost
+                      Balance Delta (ETH)
                     </label>
                     <input
                       type="number"
-                      step="0.00001"
+                      step="0.000001"
                       value={currentCost !== null ? currentCost.toFixed(6) : ""}
                       onChange={(e) => handleCostChange(e.target.value)}
                       placeholder="b·ln(…)"
@@ -748,22 +748,31 @@ export default function QueryPanel({
               </button>
 
               {/* Cost / Revenue result — shown after querying with a value */}
-              {result && value && (result.user_cost_delta !== undefined || result.user_revenue_delta !== undefined) && (
-                <div className="bg-slate-50 rounded-2xl p-4 space-y-2.5 border border-slate-100">
-                  {result.user_revenue_delta !== undefined && (
-                    <div className="flex justify-between items-center text-[10px] font-mono">
-                      <span className="text-slate-400">Revenue (on success)</span>
-                      <span className="text-emerald-600 font-bold">{formatEth(result.user_revenue_delta)}</span>
-                    </div>
-                  )}
-                  {result.user_cost_delta !== undefined && (
-                    <div className="flex justify-between items-center text-[10px] font-mono">
-                      <span className="text-slate-400">Cost Delta</span>
-                      <span className="text-slate-900 font-bold">{formatEth(result.user_cost_delta)}</span>
-                    </div>
-                  )}
-                </div>
-              )}
+              {result &&
+                value &&
+                (result.user_cost_delta !== undefined ||
+                  result.user_revenue_delta !== undefined) && (
+                  <div className="bg-slate-50 rounded-2xl p-4 space-y-2.5 border border-slate-100">
+                    {result.user_revenue_delta !== undefined && (
+                      <div className="flex justify-between items-center text-[10px] font-mono">
+                        <span className="text-slate-400">
+                          Revenue (on success)
+                        </span>
+                        <span className="text-emerald-600 font-bold">
+                          {formatEth(result.user_revenue_delta)}
+                        </span>
+                      </div>
+                    )}
+                    {result.user_cost_delta !== undefined && (
+                      <div className="flex justify-between items-center text-[10px] font-mono">
+                        <span className="text-slate-400">Cost Delta</span>
+                        <span className="text-slate-900 font-bold">
+                          {formatEth(result.user_cost_delta)}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
             </div>
           </div>
 

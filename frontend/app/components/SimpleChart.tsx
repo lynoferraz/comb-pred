@@ -3,8 +3,16 @@
 import { useRef, useEffect } from "react";
 
 const CHART_COLORS = [
-  "#2563eb", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6",
-  "#ec4899", "#06b6d4", "#84cc16", "#f97316", "#6366f1",
+  "#2563eb",
+  "#10b981",
+  "#f59e0b",
+  "#ef4444",
+  "#8b5cf6",
+  "#ec4899",
+  "#06b6d4",
+  "#84cc16",
+  "#f97316",
+  "#6366f1",
 ];
 
 interface LineChartProps {
@@ -94,7 +102,8 @@ export default function SimpleChart({
       const abs = Math.abs(val);
       if (abs === 0) return "0";
       if (abs >= 1e6) return val.toExponential(1);
-      if (abs >= 1) return val.toFixed(Math.max(0, 2 - Math.floor(Math.log10(abs))));
+      if (abs >= 1)
+        return val.toFixed(Math.max(0, 2 - Math.floor(Math.log10(abs))));
       if (abs >= 0.01) return val.toFixed(3);
       return val.toExponential(1);
     };
@@ -121,7 +130,9 @@ export default function SimpleChart({
       ctx.font = "10px system-ui";
       const step = Math.max(1, Math.floor(numPoints / 6));
       for (let i = 0; i < numPoints; i += step) {
-        const x = pad.left + (numPoints > 1 ? (i * chartW) / (numPoints - 1) : chartW / 2);
+        const x =
+          pad.left +
+          (numPoints > 1 ? (i * chartW) / (numPoints - 1) : chartW / 2);
         ctx.fillText(labels[i] || String(i), x, pad.top + chartH + 16);
       }
     }
@@ -131,7 +142,8 @@ export default function SimpleChart({
       for (let s = 0; s < data.length; s++) {
         cumulative[s] = [];
         for (let i = 0; i < numPoints; i++) {
-          cumulative[s][i] = (data[s].values[i] || 0) + (s > 0 ? cumulative[s - 1][i] : 0);
+          cumulative[s][i] =
+            (data[s].values[i] || 0) + (s > 0 ? cumulative[s - 1][i] : 0);
         }
       }
 
@@ -142,13 +154,18 @@ export default function SimpleChart({
 
         ctx.beginPath();
         for (let i = 0; i < numPoints; i++) {
-          const x = pad.left + (numPoints > 1 ? (i * chartW) / (numPoints - 1) : chartW / 2);
-          const y = pad.top + chartH - ((cumulative[s][i] - yMin) / yRange) * chartH;
+          const x =
+            pad.left +
+            (numPoints > 1 ? (i * chartW) / (numPoints - 1) : chartW / 2);
+          const y =
+            pad.top + chartH - ((cumulative[s][i] - yMin) / yRange) * chartH;
           if (i === 0) ctx.moveTo(x, y);
           else ctx.lineTo(x, y);
         }
         for (let i = numPoints - 1; i >= 0; i--) {
-          const x = pad.left + (numPoints > 1 ? (i * chartW) / (numPoints - 1) : chartW / 2);
+          const x =
+            pad.left +
+            (numPoints > 1 ? (i * chartW) / (numPoints - 1) : chartW / 2);
           const bottomVal = s > 0 ? cumulative[s - 1][i] : yMin;
           const y = pad.top + chartH - ((bottomVal - yMin) / yRange) * chartH;
           ctx.lineTo(x, y);
@@ -164,8 +181,11 @@ export default function SimpleChart({
         ctx.lineWidth = 2;
         ctx.beginPath();
         for (let i = 0; i < numPoints; i++) {
-          const x = pad.left + (numPoints > 1 ? (i * chartW) / (numPoints - 1) : chartW / 2);
-          const y = pad.top + chartH - ((series.values[i] - yMin) / yRange) * chartH;
+          const x =
+            pad.left +
+            (numPoints > 1 ? (i * chartW) / (numPoints - 1) : chartW / 2);
+          const y =
+            pad.top + chartH - ((series.values[i] - yMin) / yRange) * chartH;
           if (i === 0) ctx.moveTo(x, y);
           else ctx.lineTo(x, y);
         }

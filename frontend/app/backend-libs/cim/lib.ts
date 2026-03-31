@@ -94,7 +94,7 @@ export async function addVariable(
   if (options?.decode) { options.sync = true; }
   const result = await genericAdvanceInput<ifaces.AddVariablePayload>(
     options,
-    '0xf885a0ea',
+    '0x53ad5dc6',
     data
   );
   if (options?.sync) {
@@ -597,13 +597,13 @@ export const models: Models = {
   },
   'AddVariablePayload': {
     ioType:"mutationPayload",
-    abiTypes:['bytes32', 'uint', 'address', 'bytes32[]', 'bytes32[]', 'string'],
-    params:['alias', 'n_states', 'resolve_address', 'related_aliases', 'related_aliases2', 'info_url'],
+    abiTypes:['bytes32', 'uint', 'address', 'bytes32[]', 'bytes32[]', 'bytes32[]', 'string'],
+    params:['alias', 'n_states', 'resolve_address', 'related_aliases', 'related_aliases2', 'related_aliases3', 'info_url'],
     decoder: decodeToAddVariablePayloadInput,
     exporter: exportToAddVariablePayload,
     validator: ajv.compile<ifaces.AddVariablePayload>(
       JSON.parse(
-        '{"title": "AddVariablePayload", "type": "object", "properties": {"alias": {"title": "Alias", "type": "string", "format": "binary"}, "n_states": {"title": "N States", "type": "integer"}, "resolve_address": {"title": "Resolve Address", "type": "string"}, "related_aliases": {"title": "Related Aliases", "type": "array", "items": {"type": "string", "format": "binary"}}, "related_aliases2": {"title": "Related Aliases2", "type": "array", "items": {"type": "string", "format": "binary"}}, "info_url": {"title": "Info Url", "type": "string"}}, "required": ["alias", "n_states", "resolve_address", "related_aliases", "related_aliases2", "info_url"]}'.replace(
+        '{"title": "AddVariablePayload", "type": "object", "properties": {"alias": {"title": "Alias", "type": "string", "format": "binary"}, "n_states": {"title": "N States", "type": "integer"}, "resolve_address": {"title": "Resolve Address", "type": "string"}, "related_aliases": {"title": "Related Aliases", "type": "array", "items": {"type": "string", "format": "binary"}}, "related_aliases2": {"title": "Related Aliases2", "type": "array", "items": {"type": "string", "format": "binary"}}, "related_aliases3": {"title": "Related Aliases3", "type": "array", "items": {"type": "string", "format": "binary"}}, "info_url": {"title": "Info Url", "type": "string"}}, "required": ["alias", "n_states", "resolve_address", "related_aliases", "related_aliases2", "related_aliases3", "info_url"]}'.replace(
           /integer/g,
           'string","format":"biginteger'
         )

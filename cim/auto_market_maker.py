@@ -1,6 +1,7 @@
 import logging
 import math
 import itertools
+from typing import Tuple, List
 
 from pgmpy.inference import BeliefPropagation
 from pgmpy.factors.discrete import DiscreteFactor
@@ -18,6 +19,47 @@ def factor_with_vars(vars, j):
     if len(possible_fs) > 0: return min(possible_fs,key=lambda c:len(c.variables))
     return None
 
+def create_asset_block_with_vars(vars, factor, value=1):
+    mfactor = factor.marginalize(set(factor.variables) - set(vars), inplace=False)
+    sorted_pairs = sorted(zip(mfactor.variables, mfactor.cardinality), key=lambda x: x[0])
+    sorted_vars = [v for v, _ in sorted_pairs]
+    sorted_card = [c for _, c in sorted_pairs]
+    return DiscreteFactor(sorted_vars, sorted_card, [value] * math.prod(mfactor.cardinality))
+
+def asset_blocks_with_vars(vars, user_asset_block) -> List[DiscreteFactor]:
+    asset_blocks = []
+    for f in user_asset_block:
+        if len(set(vars) & set(f.variables)) > 0:
+            asset_blocks.append(f)
+    # There is already a factor with all variables
+    if len(asset_blocks) > 0:
+        return sorted(asset_blocks, key=lambda x: len(x.variables))
+    return []
+
+def extend_factor(f1, f2):
+    vars_not_in_f1 = f2.get_cardinality(set(f2.variables) - set(f1.variables))
+    vars_not_in_f2 = f1.get_cardinality(set(f1.variables) - set(f2.variables))
+    new_f1 = f1.copy()
+    new_f2 = f2.copy()
+    for new_var in vars_not_in_f1:
+        new_f1.product(create_factor(new_var,vars_not_in_f1[new_var]),inplace=True)
+    for new_var in vars_not_in_f2:
+        new_f2.product(create_factor(new_var,vars_not_in_f2[new_var]),inplace=True)
+    return new_f1.product(new_f2,inplace=False)
+
+def merge_asset_blocks(block_to_merge, user_asset_blocks) -> Tuple[DiscreteFactor,List[Tuple]]:
+    merged_block = None
+    blocks_to_remove = []
+    merged_block = block_to_merge
+    for block in user_asset_blocks:
+        # block is equal
+        vars = set(merged_block.variables)
+        # one block fits the other entirely
+        if len(vars & set(block.variables)) in [len(vars),len(block.variables)]:
+            blocks_to_remove.append(clique_tup(block.variables))
+            merged_block = extend_factor(merged_block,block)
+    return merged_block, blocks_to_remove
+
 def get_original_node(j,c):
     for n in j.nodes:
         if set(c) == set(n):
@@ -32,7 +74,7 @@ def factor_with_most_vars(vars, j):
     key = max(factor_dict.keys())
     return factor_dict[key]
 
-# AMM Parameter (default value for b can be set in PJTAmm.__init__)
+# AMM Parameter (default value for b can be set in ABAmm.__init__)
 def transform_fund(x, b):
     return math.e ** (x / b)
 
@@ -83,6 +125,7 @@ def enumerate_states(report, factor):
     full_other_var_states_with_evidence = []
     full_other_states = []
     if len(evidence_vars) == 0:
+        other_var_states_with_evidence = other_var_states
         for prod in itertools.product(*[factor.state_names[ov] for ov in vars_not_in_report]):
             # target states
             t = target_state.copy()
@@ -133,7 +176,7 @@ def enumerate_states(report, factor):
                     for idx, ov in enumerate(vars_not_in_report):
                         fos[ov] = prod[idx]
                     full_other_states.append(fos)
-    return full_target_states, full_other_var_states_with_evidence, full_other_states, other_var_states, report_variables
+    return full_target_states, full_other_var_states_with_evidence, full_other_states, other_var_states, report_variables, target_state, other_var_states_with_evidence
 
 def modify_factor(factor, factor_mods, m):
     for s_key, modifier in factor_mods.items():
@@ -427,8 +470,8 @@ def resolve_jt(jt, map_clique_resolve, map_clique_add, new_edges, old_to_new_cli
     new_jt.add_factors(*new_factors)
     return new_jt, q_returned_funds
 
-class PJTAmm():
-    _user_jts: dict = {}
+class ABAmm():
+    _user_asset_blocks: dict = {}
     _user_free_funds: dict = {}
     _jt: JunctionTree
     _bp: BeliefPropagation
@@ -449,26 +492,13 @@ class PJTAmm():
         self._b = b
         self._initialized = True
 
-    def get_user_jt(self, user_id):
+    def get_user_asset_block_dict(self, user_id):
         if not self._initialized: raise Exception("AMM not initialized")
-        user_jt = self._user_jts.get(user_id)
-        if user_jt is None:
-            user_jt = JunctionTree()
-            edges = list(self._bp.junction_tree.edges())
-            if edges:
-                user_jt.add_edges_from(edges)
-            else:
-                for node in self._bp.junction_tree.nodes():
-                    user_jt.add_node(node)
-            new_factors = []
-            for f in self._bp.junction_tree.get_factors():
-                sorted_pairs = sorted(zip(f.variables, f.cardinality), key=lambda x: x[0])
-                sorted_vars = [v for v, _ in sorted_pairs]
-                sorted_card = [c for _, c in sorted_pairs]
-                new_factors.append(DiscreteFactor(sorted_vars, sorted_card, [1] * math.prod(f.cardinality)))
-            user_jt.add_factors(*new_factors)
-            self._user_jts[user_id] = user_jt
-        return user_jt
+        user_ab = self._user_asset_blocks.get(user_id)
+        if user_ab is None:
+            user_ab = {}
+            self._user_asset_blocks[user_id] = user_ab
+        return user_ab
 
     # Basic ledger
     def _get_amm_balance(self):
@@ -530,50 +560,70 @@ class PJTAmm():
     def query(self, variables, evidence={}, user_id=None):
         if not self._initialized: raise Exception("AMM not initialized")
         if user_id is not None:
-            user_jt = self.get_user_jt(user_id)
             funds0 = self.get_user_free_funds(user_id)
             variables_set = set(variables)
-            factor = factor_with_most_vars(variables_set | set(evidence),user_jt).copy()
-            considered_evidence = {var: evidence[var] for var in evidence if var in factor.variables}
-            factor.reduce(considered_evidence.items(),inplace=True)
-            size_before = factor.values.size
-            factor.marginalize(set(factor.variables) - variables_set,inplace=True)
-            factor.product(factor.values.size/size_before)
-            for s_ind in range(math.prod(factor.cardinality)):
-                s = dict(factor.assignment([s_ind])[0])
-                factor.set_value(revert_fund(factor.get_value(**s), self._b), **s)
-            factor.sum(funds0,inplace=True)
-            return factor
+
+            vars_in_report = variables_set | set(evidence)
+            jt_factor = factor_with_vars(vars_in_report, self._bp.junction_tree)
+            if jt_factor is None:
+                raise Exception(f"Can't perform query with vars {vars_in_report}")
+
+            user_asset_block_dict = self.get_user_asset_block_dict(user_id)
+            asset_blocks = asset_blocks_with_vars(vars_in_report, user_asset_block_dict.values())
+            query_block = create_asset_block_with_vars(vars_in_report,jt_factor)
+            for block in asset_blocks:
+                query_block = extend_factor(query_block, block)
+            considered_evidence = {var: evidence[var] for var in evidence if var in query_block.variables}
+            query_block.reduce(considered_evidence.items(),inplace=True)
+            size_before = query_block.values.size
+            query_block.marginalize(set(query_block.variables) - variables_set,inplace=True)
+            query_block.product(query_block.values.size/size_before)
+            for s_ind in range(math.prod(query_block.cardinality)):
+                s = dict(query_block.assignment([s_ind])[0])
+                query_block.set_value(revert_fund(query_block.get_value(**s), self._b), **s)
+
+            query_block.sum(funds0,inplace=True)
+            return query_block
         return self._bp.query(variables=list(variables), evidence=evidence)
 
     def simulate_liquidation(self, user_id, variables, evidence={}):
         if not self._initialized: raise Exception("AMM not initialized")
 
         # get user factor probablities
-        user_jt = self.get_user_jt(user_id)
         funds0 = self.get_user_free_funds(user_id)
         variables_set = set(variables)
-        factor = factor_with_most_vars(variables_set | set(evidence),user_jt).copy()
-        considered_evidence = {var: evidence[var] for var in evidence if var in factor.variables}
-        evidence_set = set(considered_evidence)
-        factor.reduce(considered_evidence.items(),inplace=True)
-        size_before = factor.values.size
+        vars_in_report = variables_set | set(evidence)
 
-        factor.marginalize(set(factor.variables) - variables_set,inplace=True)
-        factor.product(factor.values.size/size_before)
+        jt_factor = factor_with_vars(vars_in_report, self._bp.junction_tree)
+        if jt_factor is None:
+            raise Exception(f"Can't simulate liquidation with vars {vars_in_report}")
+
+        user_asset_block_dict = self.get_user_asset_block_dict(user_id)
+        asset_blocks = asset_blocks_with_vars(vars_in_report, user_asset_block_dict.values())
+        wblock = create_asset_block_with_vars(vars_in_report,jt_factor)
+        for block in asset_blocks:
+            wblock = extend_factor(wblock, block)
+
+        considered_evidence = {var: evidence[var] for var in evidence if var in wblock.variables}
+        evidence_set = set(considered_evidence)
+        wblock.reduce(considered_evidence.items(),inplace=True)
+        size_before = wblock.values.size
+
+        wblock.marginalize(set(wblock.variables) - variables_set,inplace=True)
+        wblock.product(wblock.values.size/size_before)
 
         # get current probablities
-        cur_query = self._bp.query(variables=set(factor.variables) - evidence_set, evidence=considered_evidence)
+        cur_query = self._bp.query(variables=set(wblock.variables) - evidence_set, evidence=considered_evidence)
         cur_query.marginalize(set(cur_query.variables) - variables_set)
 
-        # get max and min states factor probablities
+        # get max and min states wblock probablities
         max_state = (0,0,{})
         min_state = None
-        n_states = math.prod(factor.cardinality)
+        n_states = math.prod(wblock.cardinality)
         all_t_shares = []
         for s_ind in range(n_states):
-            s = dict(factor.assignment([s_ind])[0])
-            val = factor.get_value(**s)
+            s = dict(wblock.assignment([s_ind])[0])
+            val = wblock.get_value(**s)
             all_t_shares.append(val)
             cur_p = cur_query.get_value(**s)
             if (val > max_state[0] and not math.isclose(val,max_state[0])) or (math.isclose(val,max_state[0]) and cur_p > max_state[1]):
@@ -581,7 +631,7 @@ class PJTAmm():
             if min_state is None or (val < min_state[0] and not math.isclose(val,min_state[0])) or (math.isclose(val,min_state[0]) and cur_p < min_state[1]):
                 min_state = (val,cur_p)
 
-        # get max and min states factor probablities
+        # get max and min states wblock probablities
         t_shares = max_state[0]
         p = max_state[1]
         if math.isclose(max_state[0],min_state[0]):
@@ -600,7 +650,7 @@ class PJTAmm():
     def perform_edit(self, report, user_id=None, fund_threshold=None):
         """
         Perform an edit operation on both the global and user-specific junction trees.
-        If user_id is provided, edits are applied to both self._bp.junction_tree and self._user_jts[user_id].
+        If user_id is provided, edits are applied to both self._bp.junction_tree and self._user_asset_block[user_id].
         Returns a dict with results for both edits.
         """
         if not self._initialized: raise Exception("AMM not initialized")
@@ -626,7 +676,7 @@ class PJTAmm():
             raise Exception("No factor found with all variables in report for")
 
         full_target_states, full_other_var_states_with_evidence, full_other_states, \
-            other_var_states, report_variables = \
+            other_var_states, report_variables, target_state, other_states = \
                 enumerate_states(report, factor)
 
         # Probability caching
@@ -673,26 +723,31 @@ class PJTAmm():
         bp = BeliefPropagation(cur_jt)
         bp.calibrate()
 
-        shares = {}
+        new_shares = {}
         # Edit user JT if user_id is provided
         if user_id is not None:
-            user_jt = self.get_user_jt(user_id).copy()
+            user_asset_blocks_dict = self.get_user_asset_block_dict(user_id)
 
-            user_factor = factor_with_vars(vars_in_report, user_jt)
-            if user_factor is None:
-                raise Exception("No user_factor found with all variables in report for")
+            # create new trade asset block
+            new_asset_block = create_asset_block_with_vars(vars_in_report, factor)
+            user_block_mods = {}
+            user_block_mods[clique_tup(target_state.items())] = x_target / p_target
+            for o in other_states:
+                user_block_mods[clique_tup(o.items())] = (1 - x_target) / (1 - p_target)
 
-            min_q_before = min(user_factor.values.flatten())
+            modify_factor(new_asset_block, user_block_mods, 1)
 
-            modify_factor(user_factor, factor_mods, 1)
+            # merge asset blocks
+            # user_asset_blocks = asset_blocks_with_vars(vars_in_report, user_asset_block_dict.values())
+            merged_block, removed_blocks = merge_asset_blocks(new_asset_block, sorted(user_asset_blocks_dict.values(), key=lambda x: len(x.variables), reverse=True))
 
-            all_values = user_factor.values.flatten()
-            for s_ind in range(math.prod(user_factor.cardinality)):
-                s = user_factor.assignment([s_ind])[0]
-                val = user_factor.get_value(**dict(s))
+            all_values = merged_block.values.flatten()
+            for s_ind in range(math.prod(merged_block.cardinality)):
+                s = merged_block.assignment([s_ind])[0]
+                val = merged_block.get_value(**dict(s))
                 if not math.isclose(val,0):
-                    shares[tuple(s)] = revert_fund(val, self._b)
-            # print(f"{shares=}")
+                    new_shares[tuple(s)] = revert_fund(val, self._b)
+
             min_q = min(all_values)
             if math.isclose(min_q,1):
                 # nothing changed
@@ -704,8 +759,8 @@ class PJTAmm():
                     raise Exception(f"funds needed {needed_funds} more than maximum cost {fund_threshold}")
                 self._transfer_to_amm(user_id, needed_funds)
                 q_transfered_funds = transform_fund(needed_funds, self._b)
-                user_factor.product(q_transfered_funds)
-            elif math.isclose(min_q_before,1) and min_q > 1:
+                merged_block.product(q_transfered_funds)
+            elif min_q > 1:
                 # get new global min
                 # return funds to user
                 returned_funds = revert_fund(min_q, self._b)
@@ -713,7 +768,7 @@ class PJTAmm():
                     raise Exception(f"funds returned {returned_funds} less than minimum tolerated {fund_threshold}")
                 self._transfer_from_amm(user_id, returned_funds)
                 q_returned_funds = transform_fund(returned_funds, self._b)
-                user_factor.product(1/q_returned_funds)
+                merged_block.product(1/q_returned_funds)
 
             # # Update the junction tree with the modified factor
             # cur_jt.add_factors(factor)
@@ -731,10 +786,13 @@ class PJTAmm():
 
             # results["user"] = _edit_jt(user_jt, report, funds0, jt_label=f"user_jt_{user_id}")
 
-            self._user_jts[user_id] = user_jt
+            for rb in removed_blocks:
+                del self._user_asset_blocks[user_id][rb]
+            self._user_asset_blocks[user_id][clique_tup(merged_block.variables)] = merged_block
+
             self._bp = bp
 
-        return bp, shares
+        return bp, new_shares
 
     def get_edit_bounds(self, report, user_id):
         """
@@ -743,21 +801,29 @@ class PJTAmm():
         """
         if not self._initialized: raise Exception("AMM not initialized")
 
-        user_jt = self.get_user_jt(user_id)
         q_funds0 = transform_fund(self.get_user_free_funds(user_id), self._b)
+        vars_in_report = set(report['variables']) | set(report.get('evidence',{}))
 
         prob_fn = get_prob_fn(self._bp, report)
         cur_p = prob_fn.get_value(**report['variables'])
-        cur_factor = factor_with_vars(set(report['variables']) | set(report.get('evidence',{})), user_jt)
-        if cur_factor is None:
-            raise Exception(f"No factor found with all variables in report for")
+
+        jt_factor = factor_with_vars(vars_in_report, self._bp.junction_tree)
+        if jt_factor is None:
+            raise Exception(f"Can't simulate liquidation with vars {vars_in_report}")
+
+        user_asset_block_dict = self.get_user_asset_block_dict(user_id)
+        asset_blocks = asset_blocks_with_vars(vars_in_report, user_asset_block_dict.values())
+        wblock = create_asset_block_with_vars(vars_in_report,jt_factor)
+        for block in asset_blocks:
+            wblock = extend_factor(wblock, block)
+
         min_target = None
         min_other = None
-        for s in cur_factor.assignment(range(math.prod(cur_factor.cardinality))):
+        for s in wblock.assignment(range(math.prod(wblock.cardinality))):
             s_dict = dict(s)
             evidence = report.get('evidence',{})
             if evidence is None or all(s_dict.get(k) == v for k, v in evidence.items()):
-                value = q_funds0 * cur_factor.get_value(**s_dict)
+                value = q_funds0 * wblock.get_value(**s_dict)
                 if all(s_dict.get(k) == v for k, v in report['variables'].items()):
                     s_min_target = cur_p / value
                     if min_target is None or s_min_target > min_target:
@@ -776,18 +842,20 @@ class PJTAmm():
         Returns the expected value of the user's assets.
         """
         if not self._initialized: raise Exception("AMM not initialized")
-        cur_user_jt = self.get_user_jt(user_id)
         cur_funds0 = self.get_user_free_funds(user_id)
 
         user_expected_assets = 0
-        for f in self._bp.junction_tree.get_factors():
+        user_asset_block_dict = self.get_user_asset_block_dict(user_id)
+        for block in user_asset_block_dict.values():
+
+            f = self._bp.query(variables=block.variables)
+            if f is None:
+                raise Exception(f"Asset block with vars {block.variables} can't find matching junction tree factor ")
             fn = f.normalize(inplace=False)
-            fu = cur_user_jt.get_factors(f.variables)
-            # print(f"factor {f.variables}")
             u_min_value = None
             for s_ind in range(math.prod(fn.cardinality)):
                 s = dict(fn.assignment([s_ind])[0])
-                us_value = fu.get_value(**s)
+                us_value = block.get_value(**s)
                 if u_min_value is None or us_value < u_min_value:
                     u_min_value = us_value
                 fn_v = fn.get_value(**s)
@@ -805,25 +873,32 @@ class PJTAmm():
         Returns the expected value of the user's assets.
         """
         if not self._initialized: raise Exception("AMM not initialized")
-        cur_user_jt = self.get_user_jt(user_id)
-        cur_funds0 = self.get_user_free_funds(user_id)
 
         prob_fn = get_prob_fn(self._bp, report)
         p_target = prob_fn.get_value(**report['variables'])
         x_target = report["value"]
-        cur_factor = factor_with_vars(set(report['variables']) | set(report.get('evidence',{})), cur_user_jt)
-        if cur_factor is None:
-            raise Exception(f"No factor found with all variables in report for")
+
+        vars_in_report = set(report['variables']) | set(report.get('evidence',{}))
+
+        jt_factor = factor_with_vars(vars_in_report, self._bp.junction_tree)
+        if jt_factor is None:
+            raise Exception(f"Can't simulate liquidation with vars {vars_in_report}")
+
+        user_asset_block_dict = self.get_user_asset_block_dict(user_id)
+        asset_blocks = asset_blocks_with_vars(vars_in_report, user_asset_block_dict.values())
+        wblock = create_asset_block_with_vars(vars_in_report,jt_factor)
+        for block in asset_blocks:
+            wblock = extend_factor(wblock, block)
 
         min_value_before = None
         min_value = None
         revenue_value_before = 1
         revenue_value = 1
-        for s in cur_factor.assignment(range(math.prod(cur_factor.cardinality))):
+        for s in wblock.assignment(range(math.prod(wblock.cardinality))):
             s_dict = dict(s)
             evidence = report.get('evidence',{})
             if evidence is None or all(s_dict.get(k) == v for k, v in report.get('evidence',{}).items()):
-                value = cur_factor.get_value(**s_dict)
+                value = wblock.get_value(**s_dict)
                 if all(s_dict.get(k) == v for k, v in report.get('variables',{}).items()):
                     n_value = value * x_target / p_target
                     if min_value_before is None or n_value < min_value_before:
@@ -842,7 +917,7 @@ class PJTAmm():
                         min_value = n_value
 
         revenue = revert_fund(revenue_value/revenue_value_before, self._b)
-        if min_value < 1:
+        if not math.isclose(min_value,1) and min_value < 1:
             # get funds from free funds
             return revert_fund(min_value, self._b), revenue
         return revert_fund(min_value/min_value_before, self._b), revenue
@@ -850,48 +925,73 @@ class PJTAmm():
     def perform_resolve(self, resolve):
         """
         Resolve a variable (e.g., ('asia', 1)) in the global JT and all user JTs.
-        This updates self._bp.junction_tree and all self._user_jts in place, atomically.
+        This updates self._bp.junction_tree and all self._user_asset_blocks in place, atomically.
         """
         if not self._initialized: raise Exception("AMM not initialized")
         if factor_with_vars([resolve[0]],self._bp.junction_tree) is None:
-            raise Exception(f"No factor found with variable in resolve")
+            raise Exception(f"No factor found with variable {resolve[0]} in resolve")
 
         map_clique_resolve, new_edges, old_to_new_cliques = \
             get_resolve_instructions(self._bp.junction_tree,resolve)
 
-        if True:
-            # Global JT
-            new_jt, _ = resolve_jt(self._bp.junction_tree, map_clique_resolve, {}, new_edges, old_to_new_cliques)
+        # Global JT
+        new_jt, _ = resolve_jt(self._bp.junction_tree, map_clique_resolve, {}, new_edges, old_to_new_cliques)
 
-            # User JTs
-            new_user_jt = {}
-            user_jt_updates = {}
-            for user_id, user_jt in self._user_jts.items():
-                new_user_jt, q_returned_funds = resolve_jt(user_jt, map_clique_resolve, {}, new_edges, old_to_new_cliques)
-                if math.isclose(q_returned_funds,1):
+        # User Asset blocks
+        new_user_asset_blocks = {}
+        user_ab_updates = {}
+        for user_id in self._user_asset_blocks:
+            new_user_asset_blocks = self._user_asset_blocks[user_id].copy()
+            asset_blocks = asset_blocks_with_vars([resolve[0]], new_user_asset_blocks.values())
+            remove_list = []
+            new_blocks = {}
+            q_returned_funds = 1
+            for b in asset_blocks:
+                remove_list.append(clique_tup(b.variables))
+                nb = b.reduce([resolve],inplace=False)
+                if len(nb.variables) == 0:
+                    q_returned_funds *= nb.values
                     continue
-                user_jt_updates[user_id] = new_user_jt
+                new_blocks[clique_tup(nb.variables)] = nb
+
+            for i in range(len(new_blocks)):
+                sorted_new_blocks = sorted(new_blocks.values(), key=lambda x: len(x.variables), reverse=True)
+                block_to_merge = sorted_new_blocks.pop()
+                merged_block, blocks_to_remove = merge_asset_blocks(block_to_merge, sorted_new_blocks)
+                del new_blocks[clique_tup(block_to_merge.variables)]
+                new_blocks[clique_tup(merged_block.variables)] = merged_block
+                if len(blocks_to_remove) == 0:
+                    break
+
+            for nb in new_blocks.values():
+                s_min_value = min(nb.values.flatten())
+                if not math.isclose(s_min_value,1) and s_min_value > 1:
+                    q_returned_funds *= s_min_value
+                    nb.product(1.0/s_min_value)
+            if not math.isclose(q_returned_funds,1):
                 if q_returned_funds < 1:
                     raise Exception(f"User {user_id} has insufficient funds to resolve {resolve}")
                 if q_returned_funds > 1:
                     returned_funds = revert_fund(q_returned_funds, self._b)
                     self._transfer_from_amm(user_id, returned_funds)
 
-            # If all succeed, update in place
-            bp = BeliefPropagation(new_jt)
-            bp.calibrate()
-            self._bp = bp
-            for user_id, new_user_jt in user_jt_updates.items():
-                self._user_jts[user_id] = new_user_jt
-            return bp, user_jt_updates.keys()
-        # except Exception as e:
-        #     # logger.error(f"Failed to resolve {resolve}: {e}")
-        #     raise
+            for rb in remove_list:
+                del new_user_asset_blocks[rb]
+            new_user_asset_blocks.update(new_blocks)
+            user_ab_updates[user_id] = new_user_asset_blocks
+
+        # If all succeed, update in place
+        bp = BeliefPropagation(new_jt)
+        bp.calibrate()
+        self._bp = bp
+        for user_id, new_user_blocks in user_ab_updates.items():
+            self._user_asset_blocks[user_id] = new_user_blocks
+        return bp, user_ab_updates.keys()
 
     def perform_add(self, new_var, new_var_states, cliques_to_add):
         """
         Adds a variable in the global JT and all user JTs.
-        This updates self._bp.junction_tree and all self._user_jts in place, atomically.
+        This updates self._bp.junction_tree and all self._user_asset_blocks in place, atomically.
         """
         if not self._initialized: raise Exception("AMM not initialized")
 
@@ -907,19 +1007,10 @@ class PJTAmm():
             # Global JT
             new_jt, _ = resolve_jt(self._bp.junction_tree, map_clique_resolve, map_clique_add, new_edges, old_to_new_cliques)
 
-            # User JTs
-            new_user_jt = {}
-            user_jt_updates = {}
-            for user_id, user_jt in self._user_jts.items():
-                new_user_jt, _ = resolve_jt(user_jt, map_clique_resolve, map_clique_add, new_edges, old_to_new_cliques)
-                user_jt_updates[user_id] = new_user_jt
-
             # If all succeed, update in place
             bp = BeliefPropagation(new_jt)
             bp.calibrate()
             self._bp = bp
-            for user_id, new_user_jt in user_jt_updates.items():
-                self._user_jts[user_id] = new_user_jt
             return bp
         except Exception as e:
             # logger.error(f"Failed to resolve {resolve}: {e}")
