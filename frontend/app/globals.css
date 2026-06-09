@@ -1,17 +1,106 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Design tokens ported from the CIM template (prototype/state.jsx makeTheme).
+   Light is the default; .dark overrides the same variables. Accent = green. */
+@theme {
+  --color-bg: #fafafa;
+  --color-surface: #ffffff;
+  --color-surface2: #f5f5f5;
+  --color-ink: #0a0a0a;
+  --color-ink2: #525252;
+  --color-ink3: #a3a3a3;
+  --color-ink4: #d4d4d4;
+  --color-line: #ededed;
+  --color-line2: #f5f5f5;
+  --color-accent: #16a34a;
+  --color-accent-soft: #dcfce7;
+  --color-accent-deep: #15803d;
+  --color-no: #dc2626;
+  --color-no-soft: #fee2e2;
+  --color-no-deep: #b91c1c;
+
+  --font-sans: "Geist", "Inter", -apple-system, BlinkMacSystemFont, system-ui,
+    sans-serif;
+  --font-mono: "Geist Mono", "JetBrains Mono", ui-monospace, "SF Mono", Menlo,
+    monospace;
+
+  --radius-card: 16px;
+}
+
+.dark {
+  --color-bg: #0a0a0a;
+  --color-surface: #171717;
+  --color-surface2: #1f1f1f;
+  --color-ink: #fafafa;
+  --color-ink2: #a3a3a3;
+  --color-ink3: #737373;
+  --color-ink4: #404040;
+  --color-line: #262626;
+  --color-line2: #1f1f1f;
+  --color-accent: #16a34a;
+  --color-accent-soft: #14331f;
+  --color-accent-deep: #4ade80;
+  --color-no: #dc2626;
+  --color-no-soft: #3f0a0a;
+  --color-no-deep: #f87171;
+}
+
 @layer base {
+  html {
+    color-scheme: light;
+  }
+  html.dark {
+    color-scheme: dark;
+  }
   body {
-    background-color: #fafbfc;
+    background-color: var(--color-bg);
+    color: var(--color-ink);
     font-feature-settings: "ss01", "ss03", "cv02";
+  }
+  a {
+    color: inherit;
   }
 }
 
 @keyframes fade-in {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .animate-in {
   animation: fade-in 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes cim-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.cim-spinner {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border: 1.5px solid var(--color-line);
+  border-top-color: var(--color-accent);
+  border-radius: 50%;
+  animation: cim-spin 0.8s linear infinite;
+  vertical-align: -1px;
+  margin-right: 4px;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-ink4);
+  border-radius: 4px;
 }

@@ -1,0 +1,97 @@
+{
+  "$comment": "Single source of truth for the CIM demo prediction market. Consumed by /api/info/[alias] (variable metadata) and scripts/seed-market.mjs (on-chain initialization). 'related' lists the alias of an existing variable whose clique the new variable should join; an empty 'related' starts a new clique (a new thematic cluster). Variables are listed in the exact order they must be added on-chain.",
+  "b": "0.001",
+  "ammDeposit": "1.0",
+  "variables": [
+    {
+      "alias": "inflation",
+      "name": "U.S. Inflation (2026)",
+      "description": "Year-end 2026 U.S. CPI inflation band. Drives the Federal Reserve's policy response and overall recession risk.",
+      "category": "economy",
+      "cluster": "Economy",
+      "states": ["Below 2%", "2% – 4%", "Above 4%"],
+      "related": []
+    },
+    {
+      "alias": "fedrate",
+      "name": "Fed Policy Direction (2026)",
+      "description": "Direction of the Federal Reserve's policy rate over 2026. The Fed reacts to inflation, and its decisions in turn shape recession risk.",
+      "category": "economy",
+      "cluster": "Economy",
+      "states": ["Rate Cuts", "On Hold", "Rate Hikes"],
+      "related": ["inflation"]
+    },
+    {
+      "alias": "recession",
+      "name": "U.S. Recession in 2026",
+      "description": "Whether the U.S. enters a recession (two consecutive quarters of negative GDP growth) during 2026. Jointly determined with inflation and Fed policy.",
+      "category": "economy",
+      "cluster": "Economy",
+      "states": ["Recession", "No Recession"],
+      "related": ["inflation"]
+    },
+    {
+      "alias": "approval",
+      "name": "Presidential Approval (End 2026)",
+      "description": "Presidential job-approval rating at the end of 2026. Shaped by the economic climate and, in turn, drives the midterm and 2028 election outcomes.",
+      "category": "politics",
+      "cluster": "Politics",
+      "states": ["Below 40%", "40% – 50%", "Above 50%"],
+      "related": []
+    },
+    {
+      "alias": "house",
+      "name": "2026 U.S. House Control",
+      "description": "Which party controls the U.S. House of Representatives after the 2026 midterm elections. Strongly tied to presidential approval.",
+      "category": "politics",
+      "cluster": "Politics",
+      "states": ["Democratic", "Republican"],
+      "related": ["approval"]
+    },
+    {
+      "alias": "potus",
+      "name": "2028 Presidential Winner",
+      "description": "Party of the winner of the 2028 U.S. presidential election. Influenced by the incumbent's approval and the midterm result.",
+      "category": "politics",
+      "cluster": "Politics",
+      "states": ["Democrat", "Republican", "Other"],
+      "related": ["approval"]
+    },
+    {
+      "alias": "sp500",
+      "name": "S&P 500 Full-Year 2026",
+      "description": "Whether the S&P 500 index finishes 2026 up or down on the year. Co-moves with recession sentiment and broad risk appetite.",
+      "category": "markets",
+      "cluster": "Markets",
+      "states": ["Up", "Down"],
+      "related": []
+    },
+    {
+      "alias": "btc",
+      "name": "Bitcoin Price (End 2026)",
+      "description": "Bitcoin spot price band at the end of 2026. Tracks risk appetite alongside equities.",
+      "category": "markets",
+      "cluster": "Markets",
+      "states": ["Below $80k", "$80k – $150k", "Above $150k"],
+      "related": ["sp500"]
+    },
+    {
+      "alias": "worldcup",
+      "name": "2026 FIFA World Cup Winner",
+      "description": "Confederation of the winner of the 2026 FIFA World Cup, hosted across North America.",
+      "category": "sports",
+      "cluster": "Sports",
+      "states": ["UEFA (Europe)", "CONMEBOL (S. America)", "Other Confederation"],
+      "related": []
+    },
+    {
+      "alias": "superbowl",
+      "name": "Super Bowl LX Winner",
+      "description": "Conference of the winning team in Super Bowl LX (February 2026).",
+      "category": "sports",
+      "cluster": "Sports",
+      "states": ["AFC", "NFC"],
+      "related": ["worldcup"]
+    }
+  ]
+}

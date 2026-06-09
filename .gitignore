@@ -8,3 +8,6 @@ __pycache__/
 *.png
 
 node_modules
+*.tsbuildinfo
+
+sandbox-config.json

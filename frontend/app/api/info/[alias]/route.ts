@@ -1,47 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
+import marketModel from "../../../lib/market-model.json";
 
-const INFO_DATA: Record<string, object> = {
-  cancer: {
-    alias: "cancer",
-    name: "Cancer",
-    description:
-      "Whether the patient has cancer. Influenced by pollution exposure and smoking habits.",
-    states: ["No Cancer", "Has Cancer"],
-    category: "diagnosis",
-  },
-  pol: {
-    alias: "pol",
-    name: "Pollution Level",
-    description:
-      "Environmental pollution exposure level in the patient's area of residence.",
-    states: ["Low Pollution", "High Pollution"],
-    category: "environment",
-  },
-  smok: {
-    alias: "smok",
-    name: "Smoker Status",
-    description:
-      "Whether the patient is a regular smoker. Combined with pollution, increases cancer risk.",
-    states: ["Non-Smoker", "Smoker"],
-    category: "lifestyle",
-  },
-  xray: {
-    alias: "xray",
-    name: "X-Ray Result",
-    description:
-      "Chest X-ray diagnostic result. Positive results are more likely when cancer is present.",
-    states: ["Negative", "Positive"],
-    category: "diagnostic",
-  },
-  dysp: {
-    alias: "dysp",
-    name: "Dyspnoea",
-    description:
-      "Presence of difficulty breathing (dyspnoea). Can be caused by cancer or other conditions.",
-    states: ["No Dyspnoea", "Has Dyspnoea"],
-    category: "symptom",
-  },
-};
+// Variable metadata for the demo prediction market, derived from the shared
+// market model (app/lib/market-model.json) so the API, the seed script, and
+// the on-chain variables all stay in sync. Each variable's on-chain info_url
+// points here at /api/info/<alias>.
+const INFO_DATA: Record<string, object> = Object.fromEntries(
+  marketModel.variables.map((v) => [
+    v.alias,
+    {
+      alias: v.alias,
+      name: v.name,
+      description: v.description,
+      states: v.states,
+      category: v.category,
+    },
+  ]),
+);
 
 export async function GET(
   _request: NextRequest,

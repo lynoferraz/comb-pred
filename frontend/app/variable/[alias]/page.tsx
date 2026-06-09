@@ -1,43 +1,92 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { useApp } from "../../lib/context";
-import { getRelatedVariables, getInspectOptions, getVarName, getStateName, PRECISION_FACTOR } from "../../lib/cartesi";
+import { getInspectOptions, PRECISION_FACTOR } from "../../lib/cartesi";
+import {
+  buildMarket,
+  buildMarkets,
+  plainEnglishEvidence,
+  evidenceCandidates,
+  type ProbPoint,
+  type Selection,
+} from "../../lib/market";
+import { fmt } from "../../lib/format";
+import { useConditional, useAnimatedNumber } from "../../lib/useAmmQuery";
 import { getOutputs } from "../../backend-libs/cim/lib";
-import QueryPanel from "../../components/QueryPanel";
-import SimpleChart from "../../components/SimpleChart";
-import { Activity, Layers, TrendingUp, RefreshCw, ArrowLeft, Hash } from "lucide-react";
-
-interface ProbEvent {
-  probabilities: number[];
-  volume: number;
-  volume_ss: number;
-  timestamp: number;
-  inputIndex: number;
-}
+import Pill from "../../components/ui/Pill";
+import EvidenceRail from "../../components/market/EvidenceRail";
+import ReportPanel from "../../components/market/ReportPanel";
+import {
+  ProbabilityAreaChart,
+  MultiLineChart,
+} from "../../components/ui/Charts";
 
 export default function VariableDetailPage() {
   const params = useParams();
   const alias = decodeURIComponent(params.alias as string);
-  const {
-    variables, graphNodes, config, walletAddress, appAddress, infoMap,
-  } = useApp();
+  const { variables, graphNodes, ammB, infoMap, config, appAddress } = useApp();
 
   const variable = variables.find((v) => v.alias === alias);
-  const info = infoMap[alias] ?? null;
-  const relatedAliases = getRelatedVariables(alias, graphNodes);
-  const allowedAliases = [alias, ...relatedAliases];
+  const market = useMemo(
+    () =>
+      variable ? buildMarket(variable, infoMap[alias], graphNodes, ammB) : null,
+    [variable, infoMap, alias, graphNodes, ammB],
+  );
 
-  const [probHistory, setProbHistory] = useState<ProbEvent[]>([]);
-  const [historyLoading, setHistoryLoading] = useState(false);
+  const allMarkets = useMemo(
+    () => buildMarkets(variables, infoMap, graphNodes, ammB),
+    [variables, infoMap, graphNodes, ammB],
+  );
+  const relatedMarkets = useMemo(
+    () =>
+      market ? allMarkets.filter((m) => market.related.includes(m.alias)) : [],
+    [allMarkets, market],
+  );
 
+  const [evidence, setEvidence] = useState<Selection[]>([]);
+  useEffect(() => setEvidence([]), [alias]);
+
+  // Related variables that can be added right now under the current evidence
+  // set (i.e. share a clique with target + all existing evidence) — plus the
+  // ones already in evidence so the user can remove them.
+  const relatedQuickAdd = useMemo(() => {
+    if (!market) return [];
+    const candidates = evidenceCandidates(
+      market.alias,
+      evidence,
+      allMarkets,
+      graphNodes,
+    );
+    const candidateSet = new Set(candidates.map((m) => m.alias));
+    return relatedMarkets.filter(
+      (m) =>
+        candidateSet.has(m.alias) || evidence.some((e) => e.alias === m.alias),
+    );
+  }, [market, evidence, allMarkets, graphNodes, relatedMarkets]);
+
+  const safeMarket = market ?? {
+    alias,
+    name: alias,
+    short: alias,
+    category: "",
+    description: "",
+    states: [{ name: "—", prob: 0 }],
+    volume: 0,
+    volume_ss: 0,
+    ops: 0,
+    b: 0,
+    related: [],
+  };
+  const { probs, loading } = useConditional(safeMarket as any, evidence);
+
+  // History (ProbabilityUpdated notices) for the chart + recent activity.
+  const [history, setHistory] = useState<ProbPoint[]>([]);
   const fetchHistory = useCallback(async () => {
     if (!appAddress) return;
-    setHistoryLoading(true);
     try {
-      const opts = { ...getInspectOptions(config) };
       const result = await getOutputs(
         {
           tags: [alias],
@@ -46,26 +95,21 @@ export default function VariableDetailPage() {
           order_dir: "asc",
           page_size: 100,
         },
-        opts,
+        getInspectOptions(config),
       );
-
-      const events: ProbEvent[] = result.data
+      const points: ProbPoint[] = result.data
         .filter((d: any) => d.probabilities !== undefined)
         .map((d: any) => ({
           probabilities: (d.probabilities as number[]).map(
-            (p: number) => Number(p) / PRECISION_FACTOR,
+            (p) => Number(p) / PRECISION_FACTOR,
           ),
-          volume: Number(d.volume ?? 0),
-          volume_ss: Number(d.volume_ss ?? 0),
-          timestamp: Number(d._blockTimestamp ?? 0),
-          inputIndex: Number(d._inputIndex ?? 0),
+          volume: Number(d.volume ?? 0) / 1e18,
+          volume_ss: Number(d.volume_ss ?? 0) / 1e18,
+          timestamp: Number(d._blockTimestamp ?? d.timestamp ?? 0),
         }));
-
-      setProbHistory(events);
+      setHistory(points);
     } catch (err) {
-      console.error("Failed to fetch probability history:", err);
-    } finally {
-      setHistoryLoading(false);
+      console.error("history fetch failed", err);
     }
   }, [appAddress, alias, config]);
 
@@ -73,229 +117,380 @@ export default function VariableDetailPage() {
     if (appAddress) fetchHistory();
   }, [appAddress, fetchHistory]);
 
-  const nStates = variable ? variable.states_probs.length : 0;
-
-  const volumeChartData = probHistory.length > 0
-    ? [
-        { label: "Volume", values: probHistory.map((e) => e.volume / 1e18) },
-        { label: "Short Sell", values: probHistory.map((e) => e.volume_ss / 1e18) },
-      ]
-    : [];
-
-  const probChartData = nStates > 0
-    ? Array.from({ length: nStates }, (_, stateIdx) => ({
-        label: getStateName(info, stateIdx),
-        values: probHistory.length > 0
-          ? probHistory.map((e) => e.probabilities[stateIdx] ?? 0)
-          : [variable!.states_probs[stateIdx]],
-      }))
-    : [];
-
-  const chartLabels = probHistory.map((e) =>
-    e.timestamp > 0
-      ? new Date(e.timestamp * 1000).toLocaleDateString("en", { month: "short", day: "numeric" })
-      : ""
-  );
-
-  const displayName = getVarName(info, alias);
-
-  if (!variable) {
+  if (!market) {
     return (
-      <div className="flex flex-col items-center justify-center py-20 text-center space-y-4">
-        <div className="w-20 h-20 bg-slate-100 rounded-full flex items-center justify-center text-slate-300">
-          <Layers size={40} />
+      <div className="max-w-[700px] mx-auto my-20 px-7 text-center">
+        <div className="text-xl font-semibold">Market not found</div>
+        <div className="mt-2 text-ink3">
+          <Link href="/" className="text-accent">
+            ← Back to Markets
+          </Link>
         </div>
-        <h3 className="text-xl font-black text-slate-900">Variable not found</h3>
-        <p className="text-slate-400 max-w-xs font-medium">
-          Variable &quot;{alias}&quot; not found. Make sure the market is loaded.
-        </p>
       </div>
     );
   }
 
-  return (
-    <div className="flex flex-col lg:flex-row gap-12 items-start">
-      <div className="flex-1 min-w-0 w-full space-y-8 animate-in">
-        {/* Back link */}
-        <Link
-          href="/"
-          className="flex items-center gap-2 text-xs font-bold text-slate-400 hover:text-blue-600 transition-colors no-underline"
-        >
-          <ArrowLeft size={14} /> Back to Markets
-        </Link>
+  const isBinary = market.states.length === 2;
+  const isConditional = evidence.length > 0;
+  const marginal = market.states.map((s) => s.prob);
 
-        {/* Header */}
-        <div className="flex flex-col gap-4">
-          <div className="flex items-center gap-3">
-            <span className="bg-blue-600 text-white text-[10px] font-black px-2 py-1 rounded-md uppercase tracking-tighter">Active Market</span>
-            {info?.category && (
-              <span className="text-slate-400 text-[10px] font-bold uppercase tracking-widest">{info.category}</span>
+  const chartLabels = history.map((h) =>
+    h.timestamp > 0
+      ? new Date(h.timestamp * 1000).toLocaleDateString("en", {
+          month: "short",
+          day: "numeric",
+        })
+      : "",
+  );
+
+  return (
+    <div className="px-7 pt-6 pb-14 max-w-[1500px] mx-auto grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_380px] gap-7 items-start animate-in">
+      <div className="min-w-0 flex flex-col gap-[18px]">
+        {/* Breadcrumb */}
+        <div className="text-[13px] text-ink3">
+          <Link href="/" className="text-ink3 no-underline">
+            Markets
+          </Link>
+          <span className="mx-1.5">›</span>
+          <span>{market.category}</span>
+        </div>
+
+        {/* Hero */}
+        <div className="flex justify-between items-start gap-7">
+          <div className="flex-1 min-w-0">
+            <div className="flex gap-1.5 mb-3 flex-wrap">
+              <Pill>{market.category}</Pill>
+              {market.related.length > 0 && (
+                <Pill>⇄ {market.related.length} related</Pill>
+              )}
+              {market.closes && (
+                <Pill tone="outline">Closes {market.closes}</Pill>
+              )}
+            </div>
+            <h1 className="text-[30px] font-semibold tracking-tight leading-tight text-ink text-pretty">
+              {market.name}
+            </h1>
+            {market.description && (
+              <p className="mt-3 text-sm text-ink2 leading-relaxed max-w-[620px]">
+                {market.description}
+              </p>
             )}
           </div>
-          <h2 className="text-4xl font-black text-slate-900 tracking-tight leading-none">{displayName}</h2>
-          {displayName !== alias && (
-            <div className="text-sm text-slate-400 font-mono">{alias}</div>
-          )}
-          {info?.description && (
-            <p className="text-lg text-slate-500 font-medium max-w-2xl leading-relaxed">{info.description}</p>
+          {isBinary && (
+            <HeroNumber
+              value={probs[0] ?? 0}
+              marginal={marginal[0] ?? 0}
+              isConditional={isConditional}
+              evidence={evidence}
+              relatedMarkets={relatedMarkets}
+            />
           )}
         </div>
 
-        {/* Stat cards */}
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-          {[
-            { label: "Total Volume", value: `${((variable.volume + variable.volume_ss) / 1e18).toFixed(4)} ETH`, Icon: Activity },
-            { label: "Buy", value: `${(variable.volume / 1e18).toFixed(4)} ETH`, Icon: TrendingUp },
-            { label: "Short Sell", value: `${(variable.volume_ss / 1e18).toFixed(4)} ETH`, Icon: Layers },
-            { label: "Operations", value: String(variable.n_operations), Icon: Hash },
-            { label: "Updates", value: String(probHistory.length), Icon: RefreshCw },
-          ].map((stat, i) => (
-            <div key={i} className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
-              <div className="flex items-center gap-2 mb-2">
-                <stat.Icon size={14} className="text-slate-400" />
-                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{stat.label}</span>
+        {/* Evidence rail */}
+        <EvidenceRail
+          targetAlias={market.alias}
+          evidence={evidence}
+          setEvidence={setEvidence}
+          allMarkets={allMarkets}
+          graphNodes={graphNodes}
+          loading={loading}
+        />
+
+        {/* Multi-state snapshot */}
+        {!isBinary && (
+          <div
+            className={`bg-surface rounded-card p-[22px] transition-colors ${
+              isConditional ? "border border-accent" : "border border-line"
+            }`}
+          >
+            <div className="text-xs font-medium mb-3.5 text-ink3">
+              {isConditional
+                ? "Conditional probabilities"
+                : "Current probabilities"}
+            </div>
+            <div
+              className="grid gap-3"
+              style={{
+                gridTemplateColumns: `repeat(${market.states.length}, 1fr)`,
+              }}
+            >
+              {market.states.map((s, i) => {
+                const p = probs[i] ?? 0;
+                const delta = p - (marginal[i] ?? 0);
+                const up = delta >= 0;
+                return (
+                  <div
+                    key={i}
+                    className={`p-3.5 rounded-xl ${
+                      i === 0
+                        ? "bg-accent-soft text-accent-deep border border-accent"
+                        : "bg-line2 text-ink border border-transparent"
+                    }`}
+                  >
+                    <div className="text-[11px] font-medium opacity-80">
+                      {s.name}
+                    </div>
+                    <div className="mt-1 font-mono text-[26px] font-semibold tracking-tight">
+                      {(p * 100).toFixed(0)}
+                      <span className="text-sm opacity-60">%</span>
+                    </div>
+                    {isConditional && (
+                      <div className="mt-1 text-[10px] font-mono opacity-70">
+                        was {((marginal[i] ?? 0) * 100).toFixed(0)}%{" "}
+                        <span className={up ? "text-accent" : "text-no"}>
+                          {up ? "↑" : "↓"}
+                          {Math.abs(delta * 100).toFixed(1)}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Chart */}
+        <div className="bg-surface rounded-card border border-line p-[22px]">
+          <div className="flex justify-between items-center mb-3">
+            <div className="text-sm font-semibold">
+              {isBinary ? "Price history" : "State probabilities over time"}
+            </div>
+            {history.length === 0 && (
+              <span className="text-[11px] text-ink3 font-mono">
+                no history yet
+              </span>
+            )}
+          </div>
+          <div className="h-[260px]">
+            {history.length > 0 ? (
+              isBinary ? (
+                <ProbabilityAreaChart
+                  data={history.map((h, i) => ({
+                    label: chartLabels[i],
+                    value: h.probabilities[0] ?? 0,
+                  }))}
+                />
+              ) : (
+                <MultiLineChart
+                  labels={chartLabels}
+                  series={market.states.map((s, idx) => ({
+                    name: s.name,
+                    values: history.map((h) => h.probabilities[idx] ?? 0),
+                  }))}
+                />
+              )
+            ) : (
+              <div className="h-full grid place-items-center text-ink3 text-xs">
+                No probability history available
               </div>
-              <div className="text-lg font-black text-slate-900">{stat.value}</div>
+            )}
+          </div>
+        </div>
+
+        {/* Stat grid */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          {[
+            ["Volume", `${market.volume.toFixed(2)} ETH`, "buy side"],
+            ["Reports", market.ops.toLocaleString(), "total"],
+            [
+              "Liquidity b",
+              market.b ? `${market.b.toFixed(4)} ETH` : "—",
+              "LMSR",
+            ],
+            ["Short sell", `${market.volume_ss.toFixed(2)} ETH`, "volume"],
+          ].map(([k, v, sub]) => (
+            <div
+              key={k}
+              className="bg-surface border border-line rounded-card p-[22px]"
+            >
+              <div className="text-xs text-ink3 font-medium">{k}</div>
+              <div className="mt-1.5 text-xl font-semibold font-mono tracking-tight">
+                {v}
+              </div>
+              <div className="mt-0.5 text-[11px] text-ink3">{sub}</div>
             </div>
           ))}
         </div>
 
-        {/* Probabilities + Chart */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div className="bg-white border border-slate-200 rounded-3xl p-8 shadow-sm space-y-8">
-            <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest">Market Probabilities</h3>
-            <div className="space-y-6">
-              {variable.states_probs.map((prob, i) => (
-                <div key={i} className="space-y-3">
-                  <div className="flex justify-between items-end">
-                    <div>
-                      <div className="text-sm font-black text-slate-900">{getStateName(info, i)}</div>
-                      <div className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">State {i + 1}</div>
+        {/* Related variables (filtered to the current clique-valid candidates) */}
+        {relatedQuickAdd.length > 0 && (
+          <div className="bg-surface rounded-card border border-line p-[22px] flex flex-col gap-3">
+            <div className="flex justify-between items-center">
+              <div className="text-sm font-semibold">Related variables</div>
+              <span className="text-[11px] text-ink3">
+                Quick-add any of these as evidence ↑
+              </span>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+              {relatedQuickAdd.map((rm) => {
+                const inEv = evidence.find((e) => e.alias === rm.alias);
+                return (
+                  <div
+                    key={rm.alias}
+                    className={`flex justify-between items-center p-3.5 rounded-xl ${
+                      inEv
+                        ? "border border-accent bg-accent-soft"
+                        : "border border-line"
+                    }`}
+                  >
+                    <div className="min-w-0 flex-1">
+                      <Link
+                        href={`/variable/${encodeURIComponent(rm.alias)}`}
+                        className="no-underline text-inherit text-[13px] font-semibold block truncate"
+                      >
+                        {rm.short}
+                      </Link>
+                      <div className="text-[11px] text-ink3 mt-0.5">
+                        {rm.category} · {rm.states.length} states
+                      </div>
                     </div>
-                    <div className="text-2xl font-black text-slate-900">{(prob * 100).toFixed(1)}%</div>
+                    <button
+                      onClick={() =>
+                        inEv
+                          ? setEvidence(
+                              evidence.filter((e) => e.alias !== rm.alias),
+                            )
+                          : setEvidence([
+                              ...evidence,
+                              { alias: rm.alias, stateIdx: 0 },
+                            ])
+                      }
+                      className={`ml-2.5 px-2.5 py-1.5 rounded-full text-[11px] font-semibold shrink-0 ${
+                        inEv ? "bg-accent text-ink" : "bg-line2 text-ink2"
+                      }`}
+                    >
+                      {inEv ? "✓ evidence" : "+ Use as evidence"}
+                    </button>
                   </div>
-                  <div className="h-4 w-full bg-slate-50 rounded-xl overflow-hidden border border-slate-100 p-0.5">
-                    <div
-                      className={`h-full rounded-lg transition-all duration-1000 ${i === 0 ? "bg-blue-600" : "bg-slate-900"}`}
-                      style={{ width: `${prob * 100}%` }}
-                    />
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
-            <h3 className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-6">Price Action</h3>
-            <div className="h-[240px] w-full">
-              {probChartData.length > 0 && probChartData[0].values.length > 0 ? (
-                <SimpleChart
-                  title="Probability Evolution"
-                  data={probChartData}
-                  labels={chartLabels}
-                  width={400}
-                  height={220}
-                  stacked
-                />
-              ) : (
-                <div className="flex items-center justify-center h-full text-slate-400 text-xs">
-                  No probability history available
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Volume Chart */}
-        {volumeChartData.length > 0 && (
-          <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
-            <h3 className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-6">Volume Evolution</h3>
-            <SimpleChart
-              title="Volume (ETH)"
-              data={volumeChartData}
-              labels={chartLabels}
-              width={800}
-              height={220}
-            />
-          </div>
-        )}
-
-        {/* Additional Info */}
-        {info && (
-          <div className="bg-white border border-slate-200 rounded-3xl p-8 shadow-sm space-y-4">
-            <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest">Additional Information</h3>
-            <div className="divide-y divide-slate-100">
-              {Object.entries(info)
-                .filter(([key]) => !["alias", "name", "description", "states"].includes(key))
-                .map(([key, val]) => (
-                  <div key={key} className="flex justify-between py-3 text-sm">
-                    <span className="text-slate-400 font-bold">{key}</span>
-                    <span className="text-slate-900 font-mono text-xs">{typeof val === "object" ? JSON.stringify(val) : String(val)}</span>
-                  </div>
-                ))}
+                );
+              })}
             </div>
           </div>
         )}
 
-        {/* Probability History Table */}
-        <div className="bg-white border border-slate-200 rounded-3xl overflow-hidden shadow-sm">
-          <div className="px-8 py-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
-            <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest">Probability Log</h3>
-            <button
-              onClick={fetchHistory}
-              disabled={historyLoading}
-              className="flex items-center gap-1.5 text-xs font-bold text-slate-400 hover:text-blue-600 transition-colors disabled:opacity-50"
-            >
-              <RefreshCw size={12} className={historyLoading ? "animate-spin" : ""} />
-              {historyLoading ? "Loading..." : "Refresh"}
-            </button>
-          </div>
-          {probHistory.length > 0 ? (
-            <table className="w-full text-xs">
-              <thead className="bg-slate-50/50 text-slate-400 uppercase text-[10px] font-black">
-                <tr>
-                  <th className="px-8 py-4 text-left">Time</th>
-                  {Array.from({ length: nStates }, (_, i) => (
-                    <th key={i} className="px-8 py-4 text-left">{getStateName(info, i)}</th>
-                  ))}
-                  <th className="px-8 py-4 text-right">Volume</th>
-                  <th className="px-8 py-4 text-right">Short Sell</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {probHistory.map((ev, i) => (
-                  <tr key={i} className="hover:bg-slate-50 transition-colors">
-                    <td className="px-8 py-5 text-slate-400 font-mono">
-                      {ev.timestamp > 0
-                        ? new Date(ev.timestamp * 1000).toLocaleString()
-                        : "-"}
-                    </td>
-                    {ev.probabilities.map((p, j) => (
-                      <td key={j} className="px-8 py-5 text-slate-900 font-black">{(p * 100).toFixed(1)}%</td>
-                    ))}
-                    <td className="px-8 py-5 text-right text-slate-500 font-mono">{(ev.volume / 1e18).toFixed(4)} ETH</td>
-                    <td className="px-8 py-5 text-right text-slate-500 font-mono">{(ev.volume_ss / 1e18).toFixed(4)} ETH</td>
+        {/* Recent activity (from probability updates) */}
+        {history.length > 1 && (
+          <div className="bg-surface rounded-card border border-line overflow-hidden">
+            <div className="flex justify-between items-center px-[22px] py-4 border-b border-line">
+              <div className="text-sm font-semibold">Recent activity</div>
+              <Pill tone="accent">● Live</Pill>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-[13px] border-collapse">
+                <thead>
+                  <tr className="text-ink3 text-[11px]">
+                    {["When", "P(top) moved", "Volume", "Short sell"].map(
+                      (th, i) => (
+                        <th
+                          key={th}
+                          className={`px-[22px] py-2.5 font-medium whitespace-nowrap ${
+                            i >= 2 ? "text-right" : "text-left"
+                          }`}
+                        >
+                          {th}
+                        </th>
+                      ),
+                    )}
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          ) : (
-            !historyLoading && (
-              <div className="px-8 py-12 text-center text-slate-400 text-sm">No history yet</div>
-            )
-          )}
-        </div>
+                </thead>
+                <tbody>
+                  {[...history]
+                    .slice(1)
+                    .reverse()
+                    .slice(0, 10)
+                    .map((h, idx, arr) => {
+                      const realIdx = history.length - 1 - idx;
+                      const prev = history[realIdx - 1];
+                      const from = prev?.probabilities[0] ?? h.probabilities[0];
+                      const to = h.probabilities[0];
+                      const up = to >= from;
+                      return (
+                        <tr key={realIdx} className="border-t border-line2">
+                          <td className="px-[22px] py-3 text-ink3 font-mono whitespace-nowrap">
+                            {h.timestamp > 0
+                              ? new Date(h.timestamp * 1000).toLocaleString()
+                              : "-"}
+                          </td>
+                          <td className="px-[22px] py-3 font-mono text-ink2 whitespace-nowrap">
+                            {fmt.pct(from, 1)}{" "}
+                            <span className={up ? "text-accent" : "text-no"}>
+                              →
+                            </span>{" "}
+                            <span className="text-ink font-semibold">
+                              {fmt.pct(to, 1)}
+                            </span>
+                          </td>
+                          <td className="px-[22px] py-3 font-mono text-right text-ink2 whitespace-nowrap">
+                            {h.volume.toFixed(4)} ETH
+                          </td>
+                          <td className="px-[22px] py-3 font-mono text-right text-ink2 whitespace-nowrap">
+                            {h.volume_ss.toFixed(4)} ETH
+                          </td>
+                        </tr>
+                      );
+                    })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* Query Panel */}
-      {appAddress && (
-        <QueryPanel
-          config={config}
-          variables={variables.filter((v) => allowedAliases.includes(v.alias))}
-          nodes={graphNodes}
-          walletAddress={walletAddress}
-          allowedAliases={allowedAliases}
-        />
+      {/* Report panel */}
+      <ReportPanel
+        market={market}
+        baselineProbs={probs}
+        evidence={evidence}
+        relatedMarkets={allMarkets}
+        conditionalLoading={loading}
+        onReported={fetchHistory}
+      />
+    </div>
+  );
+}
+
+function HeroNumber({
+  value,
+  marginal,
+  isConditional,
+  evidence,
+  relatedMarkets,
+}: {
+  value: number;
+  marginal: number;
+  isConditional: boolean;
+  evidence: Selection[];
+  relatedMarkets: any[];
+}) {
+  const v = useAnimatedNumber(value);
+  const delta = value - marginal;
+  return (
+    <div className="text-right shrink-0 min-w-[200px]">
+      <div
+        className={`font-mono text-[56px] font-semibold tracking-tighter leading-none transition-colors ${
+          isConditional ? "text-accent-deep" : "text-ink"
+        }`}
+      >
+        {Math.round(v * 100)}
+        <span className="text-[28px] text-accent">%</span>
+      </div>
+      {isConditional ? (
+        <div className="mt-2 flex flex-col gap-1 items-end">
+          <div className="text-xs text-accent-deep font-medium max-w-[240px] leading-snug text-right">
+            P(Yes) {plainEnglishEvidence(evidence, relatedMarkets)}
+          </div>
+          <div className="text-[11px] text-ink3 font-mono flex items-center gap-1">
+            <span className={delta >= 0 ? "text-accent" : "text-no"}>
+              {delta >= 0 ? "↑" : "↓"}
+              {Math.abs(delta * 100).toFixed(1)}pp
+            </span>
+            <span>from marginal {fmt.pct(marginal, 0)}</span>
+          </div>
+        </div>
+      ) : (
+        <div className="text-[11px] mt-1 text-ink3">P(Yes) · marginal</div>
       )}
     </div>
   );

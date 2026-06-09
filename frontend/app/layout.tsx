@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { AppProvider } from "./lib/context";
+import { ThemeProvider, themeInitScript } from "./lib/theme";
 import Header from "./components/Header";
 
 export const metadata: Metadata = {
@@ -15,11 +16,16 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body className="min-h-screen bg-[#fafbfc] text-slate-900 font-sans selection:bg-blue-600 selection:text-white">
-        <AppProvider>
-          <Header />
-          <main className="max-w-[1400px] mx-auto px-8 py-8">{children}</main>
-        </AppProvider>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
+      </head>
+      <body className="min-h-screen bg-bg text-ink font-sans selection:bg-accent selection:text-white antialiased">
+        <ThemeProvider>
+          <AppProvider>
+            <Header />
+            <main>{children}</main>
+          </AppProvider>
+        </ThemeProvider>
       </body>
     </html>
   );

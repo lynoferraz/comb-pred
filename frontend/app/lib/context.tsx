@@ -19,6 +19,7 @@ import {
 import {
   summary as fetchSummaryApi,
   operatorAddress as fetchOperatorAddr,
+  userInfo as fetchUserInfoApi,
 } from "../backend-libs/cim/lib";
 import {
   type AppConfig,
@@ -86,6 +87,9 @@ interface AppState {
   isOperator: boolean;
   infoMap: Record<string, VariableInfo | null>;
   ammB: number | undefined;
+  userFreeFunds: number | undefined;
+  userExpected: number | undefined;
+  refreshUserInfo: () => Promise<void>;
 }
 
 const AppContext = createContext<AppState | null>(null);
@@ -114,6 +118,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [graphEdges, setGraphEdges] = useState<[string[], string[]][]>([]);
   const [operatorAddr, setOperatorAddr] = useState<string | undefined>();
   const [ammB, setAmmB] = useState<number | undefined>();
+  const [userFreeFunds, setUserFreeFunds] = useState<number | undefined>();
+  const [userExpected, setUserExpected] = useState<number | undefined>();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -231,7 +237,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const data = report as Record<string, any>;
       const vars: VariableSummary[] = [];
 
-      if (data.b !== undefined) setAmmB(Number(data.b));
+      if (data.b !== undefined) setAmmB(Number(data.b) / 1e18);
 
       for (const [alias, info] of Object.entries(data)) {
         if (alias === "nodes" || alias === "edges" || alias === "b") continue;
@@ -258,6 +264,34 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (appAddress) fetchSummary();
   }, [appAddress, fetchSummary]);
+
+  // Fetch user balance (free funds + expected value) in ETH.
+  const refreshUserInfo = useCallback(async () => {
+    if (!appAddress || !nodeAddress || !walletAddress) return;
+    try {
+      const result = await fetchUserInfoApi(
+        { user_address: walletAddress },
+        {
+          ...getInspectOptions({ appAddress, nodeAddress }),
+          decode: true,
+          decodeModel: "json",
+        },
+      );
+      const data = result as { free_funds?: number; expected?: number };
+      if (data?.free_funds !== undefined)
+        setUserFreeFunds(Number(data.free_funds) / 1e18);
+      if (data?.expected !== undefined)
+        setUserExpected(Number(data.expected) / 1e18);
+    } catch {}
+  }, [appAddress, nodeAddress, walletAddress]);
+
+  useEffect(() => {
+    if (appAddress && walletAddress) refreshUserInfo();
+    else {
+      setUserFreeFunds(undefined);
+      setUserExpected(undefined);
+    }
+  }, [appAddress, walletAddress, refreshUserInfo]);
 
   const config: AppConfig = {
     appAddress: appAddress || ("0x" as Hex),
@@ -290,6 +324,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         isOperator,
         infoMap,
         ammB,
+        userFreeFunds,
+        userExpected,
+        refreshUserInfo,
       }}
     >
       {children}
