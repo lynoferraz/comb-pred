@@ -26,8 +26,17 @@ function strToBytes32(s: string): string {
 }
 
 export default function ExplorerPage() {
-  const { variables, infoMap, graphNodes, ammB, config, walletAddress, walletClient, appAddress, userExpected } =
-    useApp();
+  const {
+    variables,
+    infoMap,
+    graphNodes,
+    ammB,
+    config,
+    walletAddress,
+    walletClient,
+    appAddress,
+    userExpected,
+  } = useApp();
   const markets = useMemo(
     () => buildMarkets(variables, infoMap, graphNodes, ammB),
     [variables, infoMap, graphNodes, ammB],
@@ -112,14 +121,12 @@ export default function ExplorerPage() {
     preview?.user_revenue_delta !== undefined
       ? Number(preview.user_revenue_delta) / 1e18
       : undefined;
-  // shares = winDelta = revenueDelta + costDelta (signed; costDelta is
-  // negative when paying, so shares = revenue + cost = revenue - |cost|).
-  const shares =
-    costEth !== undefined && revenueEth !== undefined
-      ? revenueEth + costEth
-      : undefined;
+  // shares = winDelta = revenueDelta
+  const shares = revenueEth;
   const outOfBounds =
-    !!bounds && validReportValue && (reportValue < bounds[0] || reportValue > bounds[1]);
+    !!bounds &&
+    validReportValue &&
+    (reportValue < bounds[0] || reportValue > bounds[1]);
 
   const handleSubmit = async () => {
     setError(null);
@@ -165,7 +172,7 @@ export default function ExplorerPage() {
   };
 
   return (
-    <div className="px-7 pt-9 pb-14 max-w-[1400px] mx-auto flex flex-col gap-6 animate-in">
+    <div className="px-4 md:px-7 pt-9 pb-14 max-w-[1400px] mx-auto flex flex-col gap-6 animate-in">
       {/* Hero */}
       <div className="flex justify-between items-end flex-wrap gap-3">
         <div>
@@ -242,8 +249,8 @@ export default function ExplorerPage() {
                 Pick a variable to start
               </div>
               <div className="text-[13px] text-ink3 max-w-[360px] mx-auto leading-relaxed">
-                Add one variable to predict its marginal probability, or two-plus
-                to ask a joint question.
+                Add one variable to predict its marginal probability, or
+                two-plus to ask a joint question.
               </div>
             </div>
           ) : (
@@ -330,7 +337,9 @@ export default function ExplorerPage() {
                     <div className="flex justify-between text-xs">
                       <span className="text-ink2">Shares</span>
                       <span className="font-mono font-semibold text-ink">
-                        {shares !== undefined ? fmt.eth(shares, 4) : "—"}
+                        {shares !== undefined
+                          ? fmt.eth(shares * 1000000, 1) + "u"
+                          : "—"}
                       </span>
                     </div>
                     <div className="flex justify-between text-xs">
@@ -375,14 +384,21 @@ export default function ExplorerPage() {
                       <div className="text-[11px] opacity-85 font-mono mt-0.5">
                         joint cell across {targets.length} variable
                         {targets.length === 1 ? "" : "s"}
-                        {isConditional ? ` · conditional on ${evidence.length}` : ""}
+                        {isConditional
+                          ? ` · conditional on ${evidence.length}`
+                          : ""}
                       </div>
                     </div>
                   </div>
                 ) : walletAddress ? (
                   <button
                     onClick={handleSubmit}
-                    disabled={submitting || previewLoading || outOfBounds || !validReportValue}
+                    disabled={
+                      submitting ||
+                      previewLoading ||
+                      outOfBounds ||
+                      !validReportValue
+                    }
                     className="bg-ink text-accent px-5 py-4 rounded-[14px] text-[15px] font-semibold disabled:opacity-60 hover:opacity-90 transition-opacity"
                   >
                     {submitting
@@ -397,8 +413,8 @@ export default function ExplorerPage() {
                   </div>
                 )}
                 <div className="text-[11px] text-ink3 text-center font-mono">
-                  Reporting pushes this cell of the joint distribution. Same LMSR
-                  scoring rule as individual markets.
+                  Reporting pushes this cell of the joint distribution. Same
+                  LMSR scoring rule as individual markets.
                 </div>
               </div>
             </>
@@ -449,13 +465,17 @@ function VariableSection({
       <div className="flex items-center gap-2">
         <span
           className="w-2.5 h-2.5 rounded-full"
-          style={{ background: isTarget ? "var(--color-accent)" : "var(--color-ink4)" }}
+          style={{
+            background: isTarget ? "var(--color-accent)" : "var(--color-ink4)",
+          }}
         />
         <div className="text-[11px] font-bold tracking-widest uppercase text-ink3">
           {title}
         </div>
         {items.length > 0 && (
-          <span className="text-[10px] font-mono text-ink3">· {items.length}</span>
+          <span className="text-[10px] font-mono text-ink3">
+            · {items.length}
+          </span>
         )}
       </div>
 
@@ -476,13 +496,17 @@ function VariableSection({
                 }`}
               >
                 <div className="flex-1 px-3.5 py-2.5 flex items-baseline justify-between gap-3">
-                  <span className="text-[13px] font-semibold text-ink">{m.short}</span>
+                  <span className="text-[13px] font-semibold text-ink">
+                    {m.short}
+                  </span>
                   <select
                     value={it.stateIdx}
                     onChange={(e) =>
                       setItems(
                         items.map((x, idx) =>
-                          idx === i ? { ...x, stateIdx: Number(e.target.value) } : x,
+                          idx === i
+                            ? { ...x, stateIdx: Number(e.target.value) }
+                            : x,
                         ),
                       )
                     }
@@ -513,7 +537,9 @@ function VariableSection({
         <button
           onClick={() => setPicking(true)}
           className={`px-3 py-2 rounded-lg border border-dashed text-xs font-medium text-left ${
-            isTarget ? "border-accent text-accent-deep" : "border-ink4 text-ink2"
+            isTarget
+              ? "border-accent text-accent-deep"
+              : "border-ink4 text-ink2"
           }`}
         >
           + Add {isTarget ? "variable" : "evidence"}
@@ -526,7 +552,10 @@ function VariableSection({
             <span className="text-[11px] font-semibold text-ink3 uppercase tracking-wide">
               Pick a variable
             </span>
-            <button onClick={() => setPicking(false)} className="text-ink3 text-base">
+            <button
+              onClick={() => setPicking(false)}
+              className="text-ink3 text-base"
+            >
               ×
             </button>
           </div>
@@ -540,7 +569,9 @@ function VariableSection({
               className="flex justify-between items-center px-2.5 py-2 rounded-md hover:bg-line2 text-left"
             >
               <div>
-                <div className="text-[13px] font-medium text-ink">{m.short}</div>
+                <div className="text-[13px] font-medium text-ink">
+                  {m.short}
+                </div>
                 <div className="text-[10px] font-mono text-ink3 mt-px">
                   {m.category} · {m.states.length} states
                 </div>
@@ -602,14 +633,18 @@ function ResultCard({
             isConditional ? "text-accent-deep" : "text-ink3"
           }`}
         >
-          {isConditional ? "Conditional joint probability" : "Joint probability"}
+          {isConditional
+            ? "Conditional joint probability"
+            : "Joint probability"}
         </div>
         <div className="text-sm text-ink2 leading-snug text-pretty">
           <span className="font-semibold text-ink">{targetPhrase}</span>
           {evidencePhrase && (
             <>
               {" — "}
-              <span className="text-accent-deep font-medium">given {evidencePhrase}</span>
+              <span className="text-accent-deep font-medium">
+                given {evidencePhrase}
+              </span>
             </>
           )}
         </div>
@@ -628,7 +663,7 @@ function ResultCard({
           <span>Marginal · {marginalProb.toFixed(4)}</span>
           <span>·</span>
           <span className={up ? "text-accent" : "text-no"}>
-            {up ? "↑" : "↓"} {Math.abs(delta * 100).toFixed(2)}pp
+            {up ? "↑" : "↓"} {Math.abs(delta * 100).toFixed(4)}pp
           </span>
         </div>
       ) : (
@@ -679,7 +714,9 @@ function JointTable({
                 }`}
                 style={{ gridTemplateColumns: "160px 1fr 80px" }}
               >
-                <span className={`text-[13px] ${sel ? "font-semibold" : "font-medium"}`}>
+                <span
+                  className={`text-[13px] ${sel ? "font-semibold" : "font-medium"}`}
+                >
                   {s.name}
                 </span>
                 <div className="h-2 bg-line2 rounded-full overflow-hidden">
@@ -687,7 +724,9 @@ function JointTable({
                     className="h-full rounded-full transition-all"
                     style={{
                       width: `${p * 100}%`,
-                      background: sel ? "var(--color-accent)" : "var(--color-ink4)",
+                      background: sel
+                        ? "var(--color-accent)"
+                        : "var(--color-ink4)",
                     }}
                   />
                 </div>
@@ -722,7 +761,10 @@ function JointTable({
               <tr>
                 <th />
                 {m2.states.map((s, j) => (
-                  <th key={j} className="px-2 py-1.5 text-center text-ink2 font-medium text-[10px]">
+                  <th
+                    key={j}
+                    className="px-2 py-1.5 text-center text-ink2 font-medium text-[10px]"
+                  >
                     {s.name}
                   </th>
                 ))}
@@ -736,7 +778,8 @@ function JointTable({
                   </th>
                   {m2.states.map((_, j) => {
                     const p = cellProb(i, j);
-                    const sel = i === targets[0].stateIdx && j === targets[1].stateIdx;
+                    const sel =
+                      i === targets[0].stateIdx && j === targets[1].stateIdx;
                     return (
                       <td key={j} className="p-0">
                         <button
@@ -747,7 +790,9 @@ function JointTable({
                             ])
                           }
                           className={`w-full h-14 rounded-lg flex flex-col justify-center items-center gap-0.5 font-mono text-xs transition-transform ${
-                            sel ? "border-2 border-ink font-bold" : "border border-line"
+                            sel
+                              ? "border-2 border-ink font-bold"
+                              : "border border-line"
                           }`}
                           style={{
                             background: `color-mix(in srgb, var(--color-accent) ${Math.min(85, p * 220)}%, transparent)`,
@@ -772,13 +817,19 @@ function JointTable({
           <div>
             <span className="text-ink2 font-semibold">{m1.short}:</span>{" "}
             {m1.states
-              .map((s, i) => `${s.name} ${((marginals[0]?.[i] ?? 0) * 100).toFixed(0)}%`)
+              .map(
+                (s, i) =>
+                  `${s.name} ${((marginals[0]?.[i] ?? 0) * 100).toFixed(0)}%`,
+              )
               .join("  ·  ")}
           </div>
           <div>
             <span className="text-ink2 font-semibold">{m2.short}:</span>{" "}
             {m2.states
-              .map((s, j) => `${s.name} ${((marginals[1]?.[j] ?? 0) * 100).toFixed(0)}%`)
+              .map(
+                (s, j) =>
+                  `${s.name} ${((marginals[1]?.[j] ?? 0) * 100).toFixed(0)}%`,
+              )
               .join("  ·  ")}
           </div>
         </div>
@@ -805,7 +856,12 @@ function JointTable({
             <button
               key={key}
               onClick={() =>
-                setTargets(targets.map((tg, i) => ({ ...tg, stateIdx: cell.indices[i] })))
+                setTargets(
+                  targets.map((tg, i) => ({
+                    ...tg,
+                    stateIdx: cell.indices[i],
+                  })),
+                )
               }
               className={`flex justify-between gap-3 px-3 py-2 rounded-lg items-center text-left ${
                 sel ? "bg-accent-soft" : ""
@@ -821,7 +877,9 @@ function JointTable({
                   })
                   .join(" · ")}
               </span>
-              <span className="font-mono text-xs font-semibold">{cell.prob.toFixed(4)}</span>
+              <span className="font-mono text-xs font-semibold">
+                {cell.prob.toFixed(4)}
+              </span>
             </button>
           );
         })}

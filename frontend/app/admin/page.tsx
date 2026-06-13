@@ -13,6 +13,7 @@ import {
   setOperatorAddress,
 } from "../backend-libs/cim/lib";
 import GraphView from "../components/GraphView";
+import { useToast } from "../components/ui/Toast";
 import {
   Settings,
   Shield,
@@ -43,6 +44,7 @@ export default function AdminPage() {
     infoMap,
     graphNodes,
     graphEdges,
+    refresh,
   } = useApp();
 
   const [operatorAddr, setOperatorAddr] = useState("");
@@ -50,16 +52,15 @@ export default function AdminPage() {
   const [configData, setConfigData] = useState<Record<string, any> | null>(null);
   const [queryLoading, setQueryLoading] = useState(false);
 
+  const { toast, updateToast } = useToast();
   const [mutationLoading, setMutationLoading] = useState(false);
-  const [mutationResult, setMutationResult] = useState<string | null>(null);
-  const [mutationError, setMutationError] = useState<string | null>(null);
 
   const [bParam, setBParam] = useState("");
   const [newAlias, setNewAlias] = useState("");
   const [nStates, setNStates] = useState("2");
-  const [relatedAliases, setRelatedAliases] = useState("");
-  const [relatedAliases2, setRelatedAliases2] = useState("");
-  const [relatedAliases3, setRelatedAliases3] = useState("");
+  const [cliquesInput, setCliquesInput] = useState("");
+  const [newCluster, setNewCluster] = useState(true);
+  const [newClusterAliases, setNewClusterAliases] = useState("");
   const [resolveAddr, setResolveAddr] = useState("");
   const [infoUrl, setInfoUrl] = useState("");
   const [resolveAlias, setResolveAlias] = useState("");
@@ -101,14 +102,16 @@ export default function AdminPage() {
 
   const runMutation = async (label: string, fn: () => Promise<any>) => {
     setMutationLoading(true);
-    setMutationResult(null);
-    setMutationError(null);
+    const id = toast("pending", `${label}…`, "Waiting for the transaction");
     try {
       await fn();
-      setMutationResult(`${label} submitted successfully`);
+      updateToast(id, "success", `${label} submitted`);
       fetchQueries();
+      // Initialize/add/resolve all change the junction tree, so reload the
+      // graph and market snapshot.
+      refresh();
     } catch (err: any) {
-      setMutationError(err.message || `${label} failed`);
+      updateToast(id, "error", `${label} failed`, err.message);
     } finally {
       setMutationLoading(false);
     }
@@ -133,6 +136,12 @@ export default function AdminPage() {
     if (!newAlias || !nStates) return;
     const split = (s: string) =>
       s.split(",").map((x) => x.trim()).filter(Boolean).map(strToBytes32);
+    // "var2, var3; var4" -> [{aliases:[var2,var3]}, {aliases:[var4]}]
+    const cliques = cliquesInput
+      .split(";")
+      .map((c) => split(c))
+      .filter((c) => c.length > 0)
+      .map((aliases) => ({ aliases }));
     runMutation("Add Variable", () =>
       addVariable(
         {
@@ -142,9 +151,9 @@ export default function AdminPage() {
             resolveAddr ||
             operatorAddr ||
             "0x0000000000000000000000000000000000000000",
-          related_aliases: split(relatedAliases),
-          related_aliases2: split(relatedAliases2),
-          related_aliases3: split(relatedAliases3),
+          cliques,
+          new_cluster: newCluster,
+          new_cluster_aliases: split(newClusterAliases),
           info_url: infoUrl,
         } as any,
         mutationOpts,
@@ -202,7 +211,7 @@ export default function AdminPage() {
   );
 
   return (
-    <div className="px-7 pt-10 pb-14 max-w-[960px] mx-auto space-y-6 animate-in">
+    <div className="px-4 md:px-7 pt-10 pb-14 max-w-[960px] mx-auto space-y-6 animate-in">
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-[32px] font-semibold tracking-tight text-ink">
@@ -221,17 +230,6 @@ export default function AdminPage() {
           Refresh
         </button>
       </div>
-
-      {mutationResult && (
-        <div className="text-accent-deep text-xs font-medium bg-accent-soft border border-accent/30 rounded-xl px-4 py-3">
-          {mutationResult}
-        </div>
-      )}
-      {mutationError && (
-        <div className="text-no text-xs font-medium bg-no-soft border border-no/30 rounded-xl px-4 py-3">
-          {mutationError}
-        </div>
-      )}
 
       {/* Junction tree graph */}
       {graphNodes.length > 0 && (
@@ -295,7 +293,7 @@ export default function AdminPage() {
           <Plus size={14} className="text-ink3" />
           <h3 className={sectionTitle}>Add Variable</h3>
         </div>
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label className={labelClass}>Alias</label>
             <input value={newAlias} onChange={(e) => setNewAlias(e.target.value)} placeholder="e.g. var1" className={inputClass} />
@@ -309,18 +307,21 @@ export default function AdminPage() {
           <label className={labelClass}>Resolve Address</label>
           <input value={resolveAddr} onChange={(e) => setResolveAddr(e.target.value)} placeholder="0x... (defaults to operator)" className={inputClass} />
         </div>
-        <div className="grid grid-cols-3 gap-4">
+        <div>
+          <label className={labelClass}>Join Cliques</label>
+          <input value={cliquesInput} onChange={(e) => setCliquesInput(e.target.value)} placeholder="var2, var3; var4 (comma = same clique, semicolon = next clique)" className={inputClass} />
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
-            <label className={labelClass}>Related Aliases</label>
-            <input value={relatedAliases} onChange={(e) => setRelatedAliases(e.target.value)} placeholder="var2, var3" className={inputClass} />
+            <label className={labelClass}>New Cluster</label>
+            <label className="flex items-center gap-2 px-4 py-3 text-sm text-ink2">
+              <input type="checkbox" checked={newCluster} onChange={(e) => setNewCluster(e.target.checked)} />
+              Start a new clique for this variable
+            </label>
           </div>
           <div>
-            <label className={labelClass}>Related Aliases 2</label>
-            <input value={relatedAliases2} onChange={(e) => setRelatedAliases2(e.target.value)} placeholder="var4, var5" className={inputClass} />
-          </div>
-          <div>
-            <label className={labelClass}>Related Aliases 3</label>
-            <input value={relatedAliases3} onChange={(e) => setRelatedAliases3(e.target.value)} placeholder="var6, var7" className={inputClass} />
+            <label className={labelClass}>New Cluster Members</label>
+            <input value={newClusterAliases} onChange={(e) => setNewClusterAliases(e.target.value)} placeholder="var5, var6 (existing vars joined into the new clique)" className={inputClass} disabled={!newCluster} />
           </div>
         </div>
         <div>
@@ -338,7 +339,7 @@ export default function AdminPage() {
           <CheckCircle size={14} className="text-ink3" />
           <h3 className={sectionTitle}>Resolve Variable</h3>
         </div>
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label className={labelClass}>Variable</label>
             <select

@@ -43,13 +43,13 @@ export default function MarketCard({ m }: { m: Market }) {
         {isBinary ? (
           <div className="grid grid-cols-2 gap-2">
             <div className="px-3.5 py-[11px] bg-accent-soft text-accent-deep rounded-xl flex justify-between items-center">
-              <span className="text-[13px]">Yes</span>
+              <span className="text-[13px]">{m.states[0]?.name ?? "Yes"}</span>
               <span className="font-mono font-semibold text-sm">
                 {fmt.pct(m.states[0].prob)}
               </span>
             </div>
             <div className="px-3.5 py-[11px] bg-line2 text-ink2 rounded-xl flex justify-between items-center">
-              <span className="text-[13px]">No</span>
+              <span className="text-[13px]">{m.states[1]?.name ?? "No"}</span>
               <span className="font-mono font-semibold text-sm">
                 {fmt.pct(m.states[1].prob)}
               </span>
@@ -68,7 +68,7 @@ export default function MarketCard({ m }: { m: Market }) {
                 </span>
                 <div className="h-1.5 bg-line2 rounded-full overflow-hidden">
                   <div
-                    className="h-full rounded-full"
+                    className="h-full rounded-full transition-[width] duration-700"
                     style={{
                       width: `${s.prob * 100}%`,
                       background: STATE_COLORS[i % STATE_COLORS.length],
@@ -85,7 +85,7 @@ export default function MarketCard({ m }: { m: Market }) {
 
         <div className="flex justify-between items-center text-xs text-ink3">
           <span>
-            <span className="text-ink2">{m.volume.toFixed(2)} ETH</span> vol ·{" "}
+            <span className="text-ink2">{m.volume.toFixed(4)} ETH</span> vol ·{" "}
             {m.ops.toLocaleString()} reports
           </span>
           {m.closes && <span>Closes {m.closes}</span>}

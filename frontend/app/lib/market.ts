@@ -21,6 +21,7 @@ export interface Market {
   short: string;
   category: string;
   description: string;
+  tags: string[];
   states: MarketState[];
   volume: number; // ETH
   volume_ss: number; // ETH
@@ -51,6 +52,7 @@ export function buildMarket(
     short: info?.short || getVarName(info, v.alias),
     category: info?.category || "Market",
     description: info?.description || "",
+    tags: info?.tags ?? [],
     states,
     volume: (v.volume || 0) / WEI,
     volume_ss: (v.volume_ss || 0) / WEI,

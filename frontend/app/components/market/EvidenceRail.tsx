@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { Plus } from "lucide-react";
 import {
   evidenceCandidates,
   type Market,
@@ -159,13 +160,20 @@ export default function EvidenceRail({
                 Showing probability if{evidence.length > 1 ? " all of" : ""}:
               </span>
             </>
-          ) : (
+          ) : candidates.length > 0 ? (
             <>
-              <span className="text-sm font-semibold text-ink">+ Add evidence</span>
+              <button
+                onClick={() => setPicking(true)}
+                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-accent-soft border border-accent text-accent-deep text-[13px] font-semibold hover:bg-accent hover:text-surface transition-colors"
+              >
+                <Plus size={14} /> Add evidence
+              </button>
               <span className="text-[13px] text-ink2">
                 See how the probability changes under different scenarios
               </span>
             </>
+          ) : (
+            <span className="text-sm font-semibold text-ink">+ Add evidence</span>
           )}
         </div>
 
@@ -192,16 +200,12 @@ export default function EvidenceRail({
               />
             );
           })}
-          {!picking && candidates.length > 0 && (
+          {!picking && isActive && candidates.length > 0 && (
             <button
               onClick={() => setPicking(true)}
-              className={`px-3 py-1.5 rounded-full border border-dashed text-xs font-medium transition-colors ${
-                isActive
-                  ? "border-accent text-accent-deep"
-                  : "border-ink4 text-ink2"
-              }`}
+              className="px-3 py-1.5 rounded-full border border-dashed border-accent text-accent-deep text-xs font-medium transition-colors hover:bg-accent-soft"
             >
-              + Add{isActive ? " another" : " evidence"}
+              + Add another
             </button>
           )}
         </div>

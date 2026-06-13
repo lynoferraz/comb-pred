@@ -19,6 +19,17 @@ directory = "./cim"
 format = "sqfs"
 mount = "/mnt/app/cim"
 
+[drives.state]
+builder = "docker"
+dockerfile = "rootfs.dockerfile"
+target = "state"
+format = "none"
+output_type = "local"
+buildx = true
+user = "dapp"
+mount = "false"
+avoid_overwrite = "true"
+
 [drives.data]
 builder = "empty"
 size = "128Mb"

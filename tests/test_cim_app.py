@@ -6,13 +6,15 @@ import json
 import pytest
 from pydantic import BaseModel
 
-from cartesi.abi import decode_to_model
 
-from cartesapp.utils import hex2bytes, hex2str, fix_import_path, get_script_dir
+from cartesi.models import ABIFunctionSelectorHeader
+from cartesi.abi import get_abi_types_from_model, decode_to_model, encode_model
+
+from cartesapp.utils import hex2bytes, hex2str, fix_import_path, get_script_dir, bytes2hex, str2hex, hex2562uint
 from cartesapp.testclient import TestClient
-from cartesapplib.wallet.app_wallet import (
-    BalancePayload, deposit_ether, DepositEtherPayload,
-    ETHER_PORTAL_ADDRESS, EtherEvent, balance, WalletBalance,
+from cartesapplib.ledger.app_ledger import (
+    BalancePayload, DepositEtherPayload,
+    ETHER_PORTAL_ADDRESS, BalancePayload,
 )
 
 fix_import_path(f"{get_script_dir()}/..")
@@ -43,10 +45,6 @@ B_PARAM = 72_000_000_000_000_000
 def str_to_bytes32(s: str) -> bytes:
     return s.encode("ascii").ljust(32, b"\x00")
 
-
-from cartesi.models import ABIFunctionSelectorHeader
-from cartesi.abi import get_abi_types_from_model
-
 MODULE_NAME = "cim"
 
 
@@ -73,6 +71,14 @@ def find_notice(app_client: TestClient, model, start_from=-1):
             return decode_to_model(data=data[4:], model=model)
     return None
 
+
+def generate_json_input(selector, model: BaseModel) -> dict:
+    request_data = {"method":selector}
+    model_dict = model.dict(exclude_none=True)
+    if len(model_dict) > 0:
+        request_data["params"] = model_dict
+
+    return str2hex(json.dumps(request_data))
 
 ###
 # Fixtures
@@ -119,7 +125,7 @@ def test_should_deposit_amm(app_client: TestClient):
         amount=AMM_DEPOSIT,
         exec_layer_data=b"",
     )
-    hex_payload = app_client.input_helper.encode_mutation_input(deposit_ether, payload)
+    hex_payload = bytes2hex(encode_model(payload,True))
     app_client.send_advance(msg_sender=ETHER_PORTAL_ADDRESS, hex_payload=hex_payload)
     assert app_client.rollup.status
 
@@ -131,7 +137,7 @@ def test_should_deposit_user1(app_client: TestClient):
         amount=USER_DEPOSIT,
         exec_layer_data=b"",
     )
-    hex_payload = app_client.input_helper.encode_mutation_input(deposit_ether, payload)
+    hex_payload = bytes2hex(encode_model(payload,True))
     app_client.send_advance(msg_sender=ETHER_PORTAL_ADDRESS, hex_payload=hex_payload)
     assert app_client.rollup.status
 
@@ -143,23 +149,20 @@ def test_should_deposit_user2(app_client: TestClient):
         amount=USER_DEPOSIT,
         exec_layer_data=b"",
     )
-    hex_payload = app_client.input_helper.encode_mutation_input(deposit_ether, payload)
+    hex_payload = bytes2hex(encode_model(payload,True))
     app_client.send_advance(msg_sender=ETHER_PORTAL_ADDRESS, hex_payload=hex_payload)
     assert app_client.rollup.status
 
 
 @pytest.mark.order(after="test_should_deposit_user2")
 def test_should_have_user1_balance(app_client: TestClient):
-    payload = BalancePayload(address=USER1_ADDRESS)
-    hex_payload = app_client.input_helper.encode_query_json_input(balance, payload)
+    payload = BalancePayload(account=USER1_ADDRESS)
+    hex_payload = generate_json_input("ledger_getBalance", payload)
     app_client.send_inspect(hex_payload=hex_payload)
     assert app_client.rollup.status
 
-    report = app_client.rollup.reports[-1]["data"]["payload"]
-    report_json = json.loads(hex2str(report))
-    report_model = WalletBalance.parse_obj(report_json)
-    assert report_model.ether is not None
-    assert report_model.ether == USER_DEPOSIT
+    report = hex2562uint(app_client.rollup.reports[-1]["data"]["payload"])
+    assert report == USER_DEPOSIT
 
 
 ###
@@ -190,9 +193,9 @@ def test_should_add_variable_var1(app_client: TestClient):
         alias=str_to_bytes32("var1"),
         n_states=2,
         resolve_address=ADMIN_ADDRESS,
-        related_aliases=[],
-        related_aliases2=[],
-        related_aliases3=[],
+        cliques=[],
+        new_cluster=True,
+        new_cluster_aliases=[],
         info_url="https://example.com/var1",
     )
     hex_payload = app_client.input_helper.encode_mutation_input(add_variable, payload)
@@ -210,9 +213,9 @@ def test_should_add_variable_var2(app_client: TestClient):
         alias=str_to_bytes32("var2"),
         n_states=2,
         resolve_address=ADMIN_ADDRESS,
-        related_aliases=[],
-        related_aliases2=[],
-        related_aliases3=[],
+        cliques=[],
+        new_cluster=True,
+        new_cluster_aliases=[],
         info_url="https://example.com/var2",
     )
     hex_payload = app_client.input_helper.encode_mutation_input(add_variable, payload)
@@ -226,9 +229,9 @@ def test_should_fail_add_duplicate_variable(app_client: TestClient):
         alias=str_to_bytes32("var1"),
         n_states=2,
         resolve_address=ADMIN_ADDRESS,
-        related_aliases=[],
-        related_aliases2=[],
-        related_aliases3=[],
+        cliques=[],
+        new_cluster=True,
+        new_cluster_aliases=[],
         info_url="https://example.com/var1",
     )
     hex_payload = app_client.input_helper.encode_mutation_input(add_variable, payload)
@@ -236,16 +239,38 @@ def test_should_fail_add_duplicate_variable(app_client: TestClient):
     assert not app_client.rollup.status
 
 
-@pytest.mark.order(after="test_should_add_variable_var2")
-def test_should_fail_add_too_many_states(app_client: TestClient):
+@pytest.mark.order(after="test_should_fail_add_duplicate_variable")
+def test_should_add_variable_var3_with_member(app_client: TestClient):
+    """New cluster containing an existing variable as member (real separator)."""
     payload = AddVariablePayload(
-        alias=str_to_bytes32("badvar"),
-        n_states=10,
+        alias=str_to_bytes32("var3"),
+        n_states=2,
         resolve_address=ADMIN_ADDRESS,
-        related_aliases=[],
-        related_aliases2=[],
-        related_aliases3=[],
-        info_url="https://example.com/badvar",
+        cliques=[],
+        new_cluster=True,
+        new_cluster_aliases=[str_to_bytes32("var2")],
+        info_url="https://example.com/var3",
+    )
+    hex_payload = app_client.input_helper.encode_mutation_input(add_variable, payload)
+    app_client.send_advance(msg_sender=ADMIN_ADDRESS, hex_payload=hex_payload)
+    assert app_client.rollup.status
+
+    notice_model = find_notice(app_client, VariableCreated)
+    assert notice_model is not None
+    assert notice_model.alias == str_to_bytes32("var3")
+
+
+@pytest.mark.order(after="test_should_fail_add_duplicate_variable")
+def test_should_fail_add_nothing_to_do(app_client: TestClient):
+    """No cliques and no new cluster requested is rejected."""
+    payload = AddVariablePayload(
+        alias=str_to_bytes32("var4"),
+        n_states=2,
+        resolve_address=ADMIN_ADDRESS,
+        cliques=[],
+        new_cluster=False,
+        new_cluster_aliases=[],
+        info_url="https://example.com/var4",
     )
     hex_payload = app_client.input_helper.encode_mutation_input(add_variable, payload)
     app_client.send_advance(msg_sender=ADMIN_ADDRESS, hex_payload=hex_payload)
@@ -428,13 +453,11 @@ def test_should_fail_resolve_non_operator(app_client: TestClient):
 @pytest.mark.order(after="test_should_resolve_variable")
 def test_should_query_wallet_balance_after_resolve(app_client: TestClient):
     """Query user1 wallet balance after resolve — should still have funds."""
-    payload = BalancePayload(address=USER1_ADDRESS)
-    hex_payload = app_client.input_helper.encode_query_json_input(balance, payload)
+
+    payload = BalancePayload(account=USER1_ADDRESS)
+    hex_payload = generate_json_input("ledger_getBalance", payload)
     app_client.send_inspect(hex_payload=hex_payload)
     assert app_client.rollup.status
 
-    report = app_client.rollup.reports[-1]["data"]["payload"]
-    report_json = json.loads(hex2str(report))
-    report_model = WalletBalance.parse_obj(report_json)
-    assert report_model.ether is not None
-    assert report_model.ether >= 0
+    report = hex2562uint(app_client.rollup.reports[-1]["data"]["payload"])
+    assert report >= 0

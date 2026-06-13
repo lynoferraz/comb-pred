@@ -17,6 +17,7 @@ import { ammQuery } from "../lib/useAmmQuery";
 import type { QueryResult } from "../lib/cartesi";
 import { BalanceChart } from "../components/ui/Charts";
 import { LiquidationCard } from "../components/market/ReportPanel";
+import WithdrawalsCard from "../components/WithdrawalsCard";
 import { setExplorerPrefill } from "../lib/prefill";
 import { RefreshCw, Info, ArrowUpRight } from "lucide-react";
 
@@ -233,7 +234,7 @@ export default function DashboardPage() {
   }
 
   return (
-    <div className="px-7 pt-10 pb-14 max-w-[1500px] mx-auto flex flex-col gap-6 animate-in">
+    <div className="px-4 md:px-7 pt-10 pb-14 max-w-[1500px] mx-auto flex flex-col gap-6 animate-in">
       <div className="flex justify-between items-end">
         <div>
           <h1 className="text-[40px] font-semibold tracking-tight leading-none text-ink">
@@ -319,6 +320,9 @@ export default function DashboardPage() {
           ))}
         </div>
       </div>
+
+      {/* Withdrawals — claim vouchers from withdraw requests */}
+      <WithdrawalsCard />
 
       {/* Positions — expected value per joint assignment, one table per clique */}
       {positions.length > 0 && (

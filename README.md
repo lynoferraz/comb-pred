@@ -17,7 +17,7 @@ Install Cartesapp:
 ```shell
 python3 -m venv .venv
 . .venv/bin/activate
-pip3 install cartesapp[dev]@git+https://github.com/prototyp3-dev/cartesapp@v1.2.6
+pip3 install cartesapp[dev]@git+https://github.com/prototyp3-dev/cartesapp@v1.3.0
 ```
 
 ## Setup

@@ -6,20 +6,19 @@ import sys
 from pydantic import BaseModel
 from typing import Optional, List
 
-from cartesi.abi import Address, UInt, Bytes32, String, Int
+from cartesi.abi import Address, UInt, Bytes32, String, Int, Bool
 
 from cartesapp.input import query, mutation
-from cartesapp.output import output, add_output, event, emit_event, index_input
-from cartesapp.context import get_metadata
-from cartesapp.storage import Entity, helpers, seed
-from cartesapplib.wallet.app_wallet import ETHER_PORTAL_ADDRESS, DepositEtherPayload, get_wallet, EtherEvent
+from cartesapp.output import add_output, event, emit_event, index_input
+from cartesapp.context import get_metadata, get_ledger
+from cartesapp.storage import Entity, helpers
+from cartesapplib.ledger.app_ledger import ETHER_PORTAL_ADDRESS, DepositEtherPayload
 
 from .core_settings import CoreSettings
 from .model import Model
 from .auto_market_maker import create_dummy_factor, dummy_name, is_dummy_var
 LOGGER = logging.getLogger(__name__)
 
-MAX_VARIABLE_STATES = 10
 PRECISION = 6
 PRECISION_FACTOR = 10**PRECISION
 
@@ -44,13 +43,16 @@ class SetOperatorPayload(BaseModel):
 class InitializePayload(BaseModel):
     b: UInt
 
+class CliqueAliases(BaseModel):
+    aliases: List[Bytes32]
+
 class AddVariablePayload(BaseModel):
     alias: Bytes32
     n_states: UInt
     resolve_address: Address
-    related_aliases: List[Bytes32]
-    related_aliases2: List[Bytes32]
-    related_aliases3: List[Bytes32]
+    cliques: List[CliqueAliases]
+    new_cluster: Bool
+    new_cluster_aliases: List[Bytes32]
     info_url: String
 
 class ResolveVariablePayload(BaseModel):
@@ -64,6 +66,9 @@ class EditVariablesPayload(BaseModel):
     var_states: List[UInt]
     evidence_aliases: List[Bytes32]
     evidence_states: List[UInt]
+
+class VariablesPayload(BaseModel):
+    alias: str
 
 class QueryVariablesPayload(BaseModel):
     var_aliases: List[str]
@@ -148,24 +153,14 @@ def emit_probability_updates(affected_aliases: list, tags: list, timestamp: int)
 @mutation(no_module_header=True,
     msg_sender=ETHER_PORTAL_ADDRESS,
     no_header=True,
-    packed=True,
-    specialized_template=False #ether_deposit_template # don't create default template
+    packed=True
 )
 def deposit_ether(payload: DepositEtherPayload) -> bool:
     metadata = get_metadata()
 
-    # get wallet
-    wallet = get_wallet(payload.sender)
-    new_balance = wallet.deposit_ether(payload.amount)
-
-    # send event
-    asset_event = EtherEvent(
-        timestamp = metadata.block_timestamp,
-        user = wallet.owner(),
-        mod_amount = payload.amount,
-        balance = new_balance
-    )
-    emit_event(asset_event,tags=["wallet","ether","deposit",wallet.owner()])
+    ledger = get_ledger()
+    account_info = ledger.retrieve_account(account=payload.sender)
+    ledger.deposit(CoreSettings().ether_id, account_info['account_id'], payload.amount)
 
     u_tags = ['deposit','balance',payload.sender]
     expected = 0
@@ -180,6 +175,9 @@ def deposit_ether(payload: DepositEtherPayload) -> bool:
     emit_event(uev,tags=u_tags)
     LOGGER.debug(f"{payload.sender} deposited {payload.amount} ether (wei)")
     return True
+
+# TODO: withdraw substitute to avoid amm admin withdrawing more than allowed to fund its variables
+
 
 @mutation()
 def initialize_amm(payload: InitializePayload) -> bool:
@@ -200,7 +198,7 @@ def initialize_amm(payload: InitializePayload) -> bool:
     phi = create_dummy_factor(dummy_name(0))
     jt.add_node(tuple(sorted(phi.variables)))
     jt.add_factors(*[phi])
-    Model().amm.initialize(jt, b=payload.b)
+    Model().amm.initialize(jt, b=payload.b/CoreSettings().precision_div, max_states=CoreSettings().max_variable_states)
     Model().store()
     return True
 
@@ -214,7 +212,7 @@ def add_variable(payload: AddVariablePayload) -> bool:
     metadata = get_metadata()
     alias = bytes32toStr(payload.alias)
     LOGGER.info(f"Adding variable {alias} {payload.n_states}...")
-    if payload.n_states >= MAX_VARIABLE_STATES:
+    if payload.n_states >= CoreSettings().max_variable_states:
         msg = f"variable {alias} has too many states ({payload.n_states})"
         LOGGER.error(msg)
         add_output(msg)
@@ -227,21 +225,17 @@ def add_variable(payload: AddVariablePayload) -> bool:
         add_output(msg)
         return False
 
+    cliques = [list(map(bytes32toStr,c.aliases)) for c in payload.cliques]
+    new_cluster_aliases = list(map(bytes32toStr,payload.new_cluster_aliases))
+    if len(cliques) == 0 and not payload.new_cluster:
+        msg = "nothing to do: no cliques to join and no new cluster requested"
+        LOGGER.error(msg)
+        add_output(msg)
+        return False
+
     try:
-        related = []
-        related1 = list(map(bytes32toStr,payload.related_aliases))
-        if len(related1) > 0:
-            related.append(related1)
-        else:
-            related.append(None)
-        related2 = list(map(bytes32toStr,payload.related_aliases2))
-        if len(related2) > 0:
-            related.append(related2)
-        related3 = list(map(bytes32toStr,payload.related_aliases3))
-        if len(related3) > 0:
-            related.append(related3)
-        cliques = related if len(related) > 0 else [None]
-        Model().amm.perform_add(alias,payload.n_states,cliques)
+        Model().amm.perform_add(alias,payload.n_states,cliques,
+            new_cluster=payload.new_cluster,new_cluster_aliases=new_cluster_aliases)
     except Exception as e:
         msg = f"Couldn't add variable: {e}"
         LOGGER.error(msg)
@@ -400,7 +394,7 @@ def edit_variable(payload: EditVariablesPayload) -> bool:
     try:
         bp, shares = Model().amm.perform_edit(report, metadata.msg_sender, payload.fund_threshold)
         for state_assignment in shares:
-            share_value = shares[state_assignment]
+            share_value = shares[state_assignment] * CoreSettings().precision_div
             for var_name, _ in state_assignment:
                 if is_dummy_var(var_name):
                     continue
@@ -436,8 +430,8 @@ def edit_variable(payload: EditVariablesPayload) -> bool:
     index_input(tags=tags_edit)
     ev = UserBalance(
         user        = metadata.msg_sender,
-        free_funds  = Model().amm.get_user_free_funds(metadata.msg_sender),
-        expected    = Model().amm.get_expected_funds_value(metadata.msg_sender),
+        free_funds  = Model().amm.get_user_free_funds(metadata.msg_sender) * CoreSettings().precision_div,
+        expected    = Model().amm.get_expected_funds_value(metadata.msg_sender) * CoreSettings().precision_div,
         timestamp   = metadata.block_timestamp
     )
     emit_event(ev,tags=tags_edit)
@@ -453,40 +447,56 @@ def edit_variable(payload: EditVariablesPayload) -> bool:
 
 
 # summary (all variables value, )
-
 @query()
-def summary() -> bool:
-    vars = Variable.select(lambda r: not r.resolved)
-    summary_output = {}
+def variable(payload: VariablesPayload) -> bool:
+    variable_output = {}
     if not Model().amm._initialized:
         LOGGER.warning("Model not initialized")
-        add_output(summary_output)
+        add_output(variable_output)
         return True
 
-    for var in vars:
-        factor = Model().amm.query([var.alias])
-        if factor is None:
-            msg = f"factor with {var.alias} not found"
-            LOGGER.error(msg)
-            add_output(msg)
-            return False
+    var = Variable.get(lambda r: not r.resolved and r.alias == payload.alias.lower())
 
-        states_probs = []
-        for s_ind in range(math.prod(factor.cardinality)):
-            s = dict(factor.assignment([s_ind])[0])
-            states_probs.append(factor.get_value(**s))
-        summary_output[var.alias] = {
-            "states_probs": states_probs,
-            "volume": var.volume,
-            "volume_ss": var.volume_ss,
-            "n_operations": var.n_operations,
-            "info_url": var.info_url
-        }
-    summary_output['nodes'] = list(Model().amm._bp.junction_tree.nodes())
-    summary_output['edges'] = list(Model().amm._bp.junction_tree.edges())
-    summary_output['b'] = Model().amm._b
+    if var is None:
+        LOGGER.warning("Variable not found")
+        add_output(variable_output)
+        return True
 
-    add_output(summary_output)
+    factor = Model().amm.query([var.alias])
+    if factor is None:
+        msg = f"factor with {var.alias} not found"
+        LOGGER.error(msg)
+        add_output(msg)
+        return False
+
+    states_probs = []
+    for s_ind in range(math.prod(factor.cardinality)):
+        s = dict(factor.assignment([s_ind])[0])
+        states_probs.append(factor.get_value(**s))
+    variable_output = {
+        "states_probs": states_probs,
+        "volume": var.volume,
+        "volume_ss": var.volume_ss,
+        "n_operations": var.n_operations,
+        "info_url": var.info_url
+    }
+    add_output(variable_output)
+
+    return True
+
+@query()
+def graph() -> bool:
+    graph_output = {}
+    if not Model().amm._initialized:
+        LOGGER.warning("Model not initialized")
+        add_output(graph_output)
+        return True
+
+    graph_output['nodes'] = list(Model().amm._bp.junction_tree.nodes())
+    graph_output['edges'] = list(Model().amm._bp.junction_tree.edges())
+    graph_output['b'] = Model().amm._b * CoreSettings().precision_div
+
+    add_output(graph_output)
 
     return True
 
@@ -565,7 +575,7 @@ def query_amm(payload: QueryVariablesPayload) -> bool:
         if ufactor is not None:
             for s_ind in range(math.prod(ufactor.cardinality)):
                 s = dict(ufactor.assignment([s_ind])[0])
-                s['value'] = ufactor.get_value(**s)
+                s['value'] = ufactor.get_value(**s) * CoreSettings().precision_div
                 out_query['user_expected_value'].append(s)
 
         out_query['user_edit_bounds'] = Model().amm.get_edit_bounds(report,payload.user_address)
@@ -573,12 +583,12 @@ def query_amm(payload: QueryVariablesPayload) -> bool:
         liq_report, expected_free_funds = Model().amm.simulate_liquidation(user_id=payload.user_address,variables=report['variables'],evidence=report.get('evidence'))
         out_query['user_liquidation'] = {
             'report':liq_report,
-            'expected_free_funds':expected_free_funds
+            'expected_free_funds':expected_free_funds * CoreSettings().precision_div
         }
         if payload.value is not None:
             cost,revenue = Model().amm.get_edit_deltas(report,payload.user_address)
-            out_query['user_cost_delta'] = cost
-            out_query['user_revenue_delta'] = revenue
+            out_query['user_cost_delta'] = cost * CoreSettings().precision_div
+            out_query['user_revenue_delta'] = revenue * CoreSettings().precision_div
 
     add_output(out_query)
 
@@ -586,10 +596,10 @@ def query_amm(payload: QueryVariablesPayload) -> bool:
 
 @query()
 def user_info(payload: UserInfoPayload) -> bool:
-    free_funds = Model().amm.get_user_free_funds(payload.user_address)
+    free_funds = Model().amm.get_user_free_funds(payload.user_address) * CoreSettings().precision_div
     expected_funds = free_funds
     if Model().amm._initialized:
-        expected_funds = Model().amm.get_expected_funds_value(payload.user_address)
+        expected_funds = Model().amm.get_expected_funds_value(payload.user_address) * CoreSettings().precision_div
     user_info = {
         "free_funds": free_funds,
         "expected": expected_funds,

@@ -1,13 +1,37 @@
 # syntax=docker.io/docker/dockerfile:1.4
 ARG ADMIN_ADDRESS=0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
-ARG CARTESAPP_VERSION=1.2.4
-ARG CARTESAPPLIB_VERSION=0.1.0
+ARG CARTESAPP_VERSION=1.3.0
+ARG CARTESAPPLIB_VERSION=0.2.1
 ARG BASE_IMAGE=cartesapp # base
 
 ARG IMAGE_NAME=riscv64/python
 ARG IMAGE_TAG=3.12.12-alpine3.22
 # ARG IMAGE_TAG=3.13.11-alpine3.22
 ARG MACHINE_GUEST_TOOLS_VERSION=0.17.1-r1
+
+ARG CARTESAPP_ROOTFS_IMAGE=ghcr.io/prototyp3-dev/cartesapp-rootfs
+ARG CARTESAPP_ROOTFS_VERSION=${CARTESAPP_VERSION}
+FROM --platform=linux/riscv64 ${CARTESAPP_ROOTFS_IMAGE}:${CARTESAPP_ROOTFS_VERSION} AS state-builder
+
+WORKDIR /opt/state
+
+COPY cim/settings.py .
+
+COPY <<EOF /opt/state/build_state.py
+from cartesapplib.ledger.utils import initialize_ledger
+from settings import LEDGER_CONFIG
+
+LEDGER_CONFIG["mem_file"] = "state.bin"
+initialize_ledger(LEDGER_CONFIG)
+EOF
+
+ENV PYTHONPATH="${PYTHONPATH}:/opt/python_libs"
+
+RUN /usr/local/bin/python3 build_state.py
+
+FROM --platform=linux/riscv64 scratch AS state
+
+COPY --from=state-builder /opt/state/state.bin /
 
 FROM --platform=linux/riscv64 ghcr.io/prototyp3-dev/cartesapp-rootfs:${CARTESAPP_VERSION} as cartesapp
 
@@ -62,7 +86,7 @@ RUN pip install nuitka[onefile]==${NUITKA_VERSION} zstandard==${ZSTANDARD_VERSIO
 
 ARG CARTESAPP_VERSION
 ARG CARTESAPPLIB_VERSION
-RUN pip install cartesapp[machine]@git+https://github.com/prototyp3-dev/cartesapp@v${CARTESAPP_VERSION} --find-links https://prototyp3-dev.github.io/pip-wheels-riscv/wheels/
+RUN pip install cartesapp[machine,machine-asset]@git+https://github.com/prototyp3-dev/cartesapp@v${CARTESAPP_VERSION} --find-links https://prototyp3-dev.github.io/pip-wheels-riscv/wheels/
 RUN pip install cartesapplib@git+https://github.com/prototyp3-dev/cartesapplib@v${CARTESAPPLIB_VERSION} --find-links https://prototyp3-dev.github.io/pip-wheels-riscv/wheels/
 
 # COPY cim/ /opt/cim/cim/

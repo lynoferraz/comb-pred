@@ -1,13 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
 import { useApp } from "./lib/context";
 import { buildMarkets } from "./lib/market";
-import { fmt } from "./lib/format";
 import MarketCard from "./components/market/MarketCard";
-import Pill from "./components/ui/Pill";
-import Donut from "./components/ui/Donut";
+import FeaturedCard from "./components/market/FeaturedCard";
+import { MarketGridSkeleton } from "./components/ui/Skeleton";
 import { Search, RefreshCw } from "lucide-react";
 
 export default function Home() {
@@ -18,13 +16,19 @@ export default function Home() {
     infoMap,
     loading,
     error,
-    fetchSummary,
+    refresh,
     appAddress,
   } = useApp();
 
   const [search, setSearch] = useState("");
   const [cat, setCat] = useState("All");
   const [sort, setSort] = useState("Volume");
+
+  // Render the grid in pages; filtering/sorting still runs over the full
+  // market list, this only caps how many cards are mounted.
+  const PAGE_SIZE = 24;
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  useEffect(() => setVisibleCount(PAGE_SIZE), [search, cat, sort]);
 
   const markets = useMemo(
     () => buildMarkets(variables, infoMap, graphNodes, ammB),
@@ -45,7 +49,9 @@ export default function Home() {
         if (
           !m.name.toLowerCase().includes(q) &&
           !m.alias.toLowerCase().includes(q) &&
-          !m.category.toLowerCase().includes(q)
+          !m.category.toLowerCase().includes(q) &&
+          !m.tags.some((t) => t.toLowerCase().includes(q)) &&
+          !m.states.some((s) => s.name.toLowerCase().includes(q))
         )
           return false;
       }
@@ -64,7 +70,7 @@ export default function Home() {
   const showFeatured = !search && cat === "All" && featured;
 
   return (
-    <div className="px-7 pt-10 pb-14 max-w-[1500px] mx-auto animate-in">
+    <div className="px-4 md:px-7 pt-10 pb-14 max-w-[1500px] mx-auto animate-in">
       {/* Hero */}
       <div className="mb-8 flex flex-col md:flex-row md:items-end md:justify-between gap-4">
         <div>
@@ -86,7 +92,7 @@ export default function Home() {
             />
           </div>
           <button
-            onClick={fetchSummary}
+            onClick={refresh}
             disabled={loading || !appAddress}
             title="Refresh"
             className="p-2.5 rounded-full border border-line text-ink2 hover:bg-line2 disabled:opacity-50 transition-colors"
@@ -134,54 +140,12 @@ export default function Home() {
       )}
 
       {/* Featured */}
-      {showFeatured && (
-        <Link
-          href={`/variable/${encodeURIComponent(featured.alias)}`}
-          className="no-underline text-inherit"
-        >
-          <div className="bg-ink text-surface rounded-3xl p-8 mb-7 grid md:grid-cols-[1.5fr_1fr] gap-6 items-center">
-            <div>
-              <Pill tone="accent">🔥 Most active</Pill>
-              <div className="text-[28px] font-semibold tracking-tight mt-3.5 leading-tight max-w-[440px]">
-                {featured.name}
-              </div>
-              <div className="mt-3.5 text-[13px] text-ink3">
-                {featured.ops.toLocaleString()} reports ·{" "}
-                {featured.volume.toFixed(2)} ETH volume
-              </div>
-              <div className="mt-5 flex flex-wrap gap-x-6 gap-y-2 text-sm">
-                {featured.states.slice(0, 4).map((s, i) => (
-                  <div key={i} className="flex items-baseline gap-2">
-                    <span className="text-ink3">{s.name}</span>
-                    <span className="font-mono font-semibold text-surface">
-                      {fmt.pct(s.prob)}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div className="flex flex-col items-center gap-2">
-              <Donut
-                p={featured.states[0]?.prob ?? 0}
-                size={160}
-                strokeW={14}
-                color="var(--color-accent)"
-                trackColor="rgba(255,255,255,0.15)"
-                textColor="var(--color-surface)"
-                subTextColor="rgba(255,255,255,0.6)"
-              />
-              <div className="text-xs text-ink3 font-mono">
-                {featured.states.length === 2
-                  ? "P(Yes)"
-                  : featured.states[0]?.name}
-              </div>
-            </div>
-          </div>
-        </Link>
-      )}
+      {showFeatured && <FeaturedCard m={featured} />}
 
       {/* Grid */}
-      {filtered.length === 0 ? (
+      {loading && markets.length === 0 ? (
+        <MarketGridSkeleton />
+      ) : filtered.length === 0 ? (
         <div className="p-16 text-center text-ink3 bg-surface rounded-card border border-line">
           <div className="text-sm font-medium text-ink2">
             {markets.length === 0
@@ -195,11 +159,23 @@ export default function Home() {
           </div>
         </div>
       ) : (
-        <div className="grid gap-3.5 [grid-template-columns:repeat(auto-fill,minmax(380px,1fr))]">
-          {filtered.map((m) => (
-            <MarketCard key={m.alias} m={m} />
-          ))}
-        </div>
+        <>
+          <div className="grid gap-3.5 [grid-template-columns:repeat(auto-fill,minmax(min(380px,100%),1fr))] stagger-children">
+            {filtered.slice(0, visibleCount).map((m) => (
+              <MarketCard key={m.alias} m={m} />
+            ))}
+          </div>
+          {filtered.length > visibleCount && (
+            <div className="mt-6 text-center">
+              <button
+                onClick={() => setVisibleCount((c) => c + PAGE_SIZE)}
+                className="px-5 py-2.5 rounded-full border border-line bg-surface text-[13px] font-medium text-ink2 hover:text-ink hover:bg-line2 transition-colors"
+              >
+                Show more ({filtered.length - visibleCount} remaining)
+              </button>
+            </div>
+          )}
+        </>
       )}
     </div>
   );

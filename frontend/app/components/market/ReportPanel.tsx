@@ -11,6 +11,7 @@ import { ammQuery } from "../../lib/useAmmQuery";
 import { editVariable } from "../../backend-libs/cim/lib";
 import type { QueryResult } from "../../lib/cartesi";
 import { setExplorerPrefill, liquidationToPrefill } from "../../lib/prefill";
+import { useToast } from "../ui/Toast";
 
 function strToBytes32(s: string): string {
   const hex = Array.from(new TextEncoder().encode(s))
@@ -44,6 +45,7 @@ export default function ReportPanel({
     refreshUserInfo,
   } = useApp();
   const router = useRouter();
+  const { toast, updateToast } = useToast();
   const isBinary = market.states.length === 2;
   const isConditional = evidence.length > 0;
   const b = market.b || 0;
@@ -207,6 +209,11 @@ export default function ReportPanel({
       return;
     }
     setSubmitting(true);
+    const toastId = toast(
+      "pending",
+      "Submitting forecast…",
+      `${market.short || market.name} → ${stateName} at ${fmt.pct(reportValue)}`,
+    );
     try {
       // Fund threshold from the cost preview minus the safety margin.
       const threshold = costEth - Math.abs(costEth) * (marginPct / 100);
@@ -222,11 +229,18 @@ export default function ReportPanel({
         applicationAddress: appAddress,
         client: walletClient,
       });
+      updateToast(toastId, "success", "Forecast submitted");
       setSubmitted(true);
       setTimeout(() => setSubmitted(false), 4000);
       await refreshUserInfo();
       onReported();
     } catch (err: any) {
+      updateToast(
+        toastId,
+        "error",
+        "Forecast failed",
+        err.message || "Submit report failed",
+      );
       setError(err.message || "Submit report failed");
     } finally {
       setSubmitting(false);
@@ -310,7 +324,8 @@ export default function ReportPanel({
             }`}
           >
             <span className="text-[13px]">
-              Buy Yes{isConditional && " (cond.)"}
+              {market.states[0].name}
+              {isConditional && " (cond.)"}
             </span>
             <span className="text-[22px] font-mono font-semibold">
               {fmt.pct(baselineProbs[0] ?? 0)}
@@ -323,7 +338,8 @@ export default function ReportPanel({
             }`}
           >
             <span className="text-[13px]">
-              Buy No{isConditional && " (cond.)"}
+              {market.states[1].name}
+              {isConditional && " (cond.)"}
             </span>
             <span className="text-[22px] font-mono font-semibold">
               {fmt.pct(baselineProbs[1] ?? 0)}
@@ -358,9 +374,27 @@ export default function ReportPanel({
             </div>
             <div className="flex gap-1.5 mt-2">
               {[
-                { l: "25%", v: userBalance * 0.25 },
-                { l: "50%", v: userBalance * 0.5 },
-                { l: "Max", v: userBalance * 0.9 },
+                {
+                  l: "25%",
+                  v: Math.min(
+                    userBalance || b * market.states.length * 0.25,
+                    b * market.states.length * 0.25,
+                  ),
+                },
+                {
+                  l: "50%",
+                  v: Math.min(
+                    userBalance || b * market.states.length * 0.5,
+                    b * market.states.length * 0.5,
+                  ),
+                },
+                {
+                  l: "Max",
+                  v: Math.min(
+                    userBalance || b * market.states.length * 0.99,
+                    b * market.states.length * 0.99,
+                  ),
+                },
               ].map((p) => (
                 <button
                   key={p.l}
@@ -413,7 +447,7 @@ export default function ReportPanel({
             <div className="flex justify-between items-baseline text-xs">
               <span className="text-ink2">You'd get</span>
               <span className="font-mono text-ink font-semibold whitespace-nowrap">
-                {fmt.eth(shares, 4)} shares
+                {fmt.eth(shares * 1000000, 1)}u shares
               </span>
             </div>
             <div className="flex justify-between items-baseline text-xs">
@@ -502,7 +536,11 @@ export default function ReportPanel({
 
           <div className="bg-line2 rounded-[14px] p-3.5 flex flex-col gap-2">
             {[
-              ["Shares received", fmt.eth(shares, 4), "text-ink"],
+              [
+                "Shares received",
+                fmt.eth(shares * 1000000, 1) + "u",
+                "text-ink",
+              ],
               ["Cost now", fmt.eth(Math.abs(costEth), 5) + " ETH", "text-ink"],
               [
                 "Revenue if right",
@@ -600,7 +638,7 @@ export default function ReportPanel({
           {submitting
             ? "Submitting…"
             : mode === "beginner"
-              ? `Buy ${fmt.eth(shares, 4)} ${isBinary ? (side === "yes" ? "Yes" : "No") : `"${stateName}"`} shares`
+              ? `Buy ${fmt.eth(shares * 1000000, 1)}u ${stateName} shares`
               : `Submit at ${pNew.toFixed(4)}`}
         </button>
       ) : (

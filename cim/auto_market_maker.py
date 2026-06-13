@@ -190,7 +190,9 @@ def get_jt_update_instructions(
     variable: str = None,
     value: int = None,
     new_var_states: int = None,
-    cliques_to_add: list = None
+    cliques_to_add: list = None,
+    new_cluster: bool = False,
+    new_cluster_aliases: list = None
 ):
     """
     Enhanced unified function for generating JT update instructions for resolving or adding a variable.
@@ -199,7 +201,15 @@ def get_jt_update_instructions(
     variable: variable to resolve or add
     value: value to resolve to (for resolve)
     new_var_states: cardinality for new variable (for add)
-    cliques_to_add: cliques to add variable to (for add)
+    cliques_to_add: existing cliques to absorb the variable into (for add); each entry is a
+        non-empty list of variable names identifying an existing clique
+    new_cluster: create a new clique containing the variable (for add)
+    new_cluster_aliases: existing variables that become members of the new clique, joined to
+        their home clique by a real separator. Empty means the new clique holds only the new
+        variable (attached via dummy separator = independence). If the members span two
+        adjacent cliques whose separator is covered by the members, the new clique is spliced
+        onto that edge (C1-N-C2); any other multi-clique combination is rejected since it
+        would create a loop or violate the running intersection property.
     """
     if jt is None or not hasattr(jt, 'get_factors'):
         raise ValueError("jt must be a valid JunctionTree")
@@ -223,6 +233,9 @@ def get_jt_update_instructions(
     existing_cliques_to_add = []
     create_new_clique = False
     clique_to_connect_new_clique = None
+    members = []
+    splice_edge = None
+    removed_edges = set()
     new_edges = []
 
     var_to_resolve = set()
@@ -236,26 +249,23 @@ def get_jt_update_instructions(
         tup_to_resolve.append((variable, value))
 
     elif operation == 'add':
-        if len(cliques_to_add) < 1 or len(cliques_to_add) > 3:
-            raise Exception(f"Can't add variable with {len(cliques_to_add)} cliques")
+        members = list(dict.fromkeys(new_cluster_aliases or []))
+        if len(cliques_to_add) == 0 and not new_cluster:
+            raise Exception("nothing to do: must specify cliques and/or new_cluster")
+        if len(members) > 0 and not new_cluster:
+            raise Exception("new_cluster_aliases given but new_cluster is false")
         for f in jt.get_factors():
             if variable in f.variables:
                 raise Exception(f"Can't add existing variable")
         for co in cliques_to_add:
-            if co is None:
-                create_new_clique = True
-                continue
+            if co is None or len(co) == 0:
+                raise Exception("empty clique specification")
             f = factor_with_vars(co, jt)
-            c = clique_tup(f.variables)
             if f is None:
-                raise Exception(f"Clique {c} does not exist in Junction Tree")
-            existing_cliques_to_add.append(c)
-        if create_new_clique:
-            if len(existing_cliques_to_add) > 0:
-                clique_to_connect_new_clique = min(existing_cliques_to_add, key=lambda c: len(c))
-            else:
-                cliques = [clique_tup(f.variables) for f in jt.get_factors()]
-                clique_to_connect_new_clique = min(cliques, key=lambda c: len(c))
+                raise Exception(f"Clique {clique_tup(co)} does not exist in Junction Tree")
+            c = clique_tup(f.variables)
+            if c not in existing_cliques_to_add:
+                existing_cliques_to_add.append(c)
         if len(existing_cliques_to_add) > 1:
             for c in existing_cliques_to_add:
                 has_neighbor = False
@@ -266,6 +276,51 @@ def get_jt_update_instructions(
                         break
                 if not has_neighbor:
                     raise Exception(f"Clique {c} has no connection to other requested cliques")
+        if new_cluster:
+            create_new_clique = True
+            for m in members:
+                if m == variable:
+                    raise Exception("new variable can't be listed as a cluster member")
+                if is_dummy_var(m):
+                    raise Exception("can't use dummy variable as cluster member")
+                if factor_with_vars([m], jt) is None:
+                    raise Exception(f"Cluster member variable {m} does not exist in Junction Tree")
+            if len(members) == 0:
+                if len(existing_cliques_to_add) > 0:
+                    clique_to_connect_new_clique = min(existing_cliques_to_add, key=lambda c: len(c))
+                else:
+                    cliques = [clique_tup(f.variables) for f in jt.get_factors()]
+                    clique_to_connect_new_clique = min(cliques, key=lambda c: len(c))
+            else:
+                home_f = factor_with_vars(members, jt)
+                if home_f is not None:
+                    # all members live together in one existing clique: attach there (real separator)
+                    if len(existing_cliques_to_add) > 0:
+                        containing = [c for c in existing_cliques_to_add if set(members) <= set(c)]
+                        if len(containing) == 0:
+                            raise Exception("can't mix cliques and new_cluster members: members' home clique must be one of the absorbed cliques (running intersection property would be violated)")
+                        clique_to_connect_new_clique = min(containing, key=lambda c: len(c))
+                        if set(members) == {v for v in clique_to_connect_new_clique if not is_dummy_var(v)}:
+                            raise Exception(f"new cluster would duplicate clique {clique_to_connect_new_clique} after absorption")
+                    else:
+                        clique_to_connect_new_clique = clique_tup(home_f.variables)
+                else:
+                    # members span multiple cliques: only valid as a splice of one adjacent pair
+                    candidates = []
+                    for (e1, e2) in jt.edges():
+                        u = set(e1) - set(get_dummies(e1))
+                        v = set(e2) - set(get_dummies(e2))
+                        if set(members) <= (u | v) and (u & v) <= set(members):
+                            candidates.append((clique_tup(e1), clique_tup(e2)))
+                    if len(candidates) == 0:
+                        raise Exception(f"can't create cluster with members {members}: adding it would create a loop or violate the running intersection property")
+                    if len(candidates) > 1:
+                        raise Exception("ambiguous cluster placement: members span multiple adjacent clique pairs")
+                    splice_edge = candidates[0]
+                    for c in existing_cliques_to_add:
+                        if c not in splice_edge:
+                            raise Exception("can't mix cliques and new_cluster members: absorbed cliques must be the spliced cliques (running intersection property would be violated)")
+                    removed_edges = {frozenset(splice_edge)}
 
     # Main logic (flattened, direct mapping)
     for fn in jt.get_factors():
@@ -292,6 +347,7 @@ def get_jt_update_instructions(
         only_dummies = all(is_dummy_var(v) for v in new_c)
         # print(f"  new edges {new_c}")
         for no in neighbors:
+            if frozenset((original_clique, clique_tup(no))) in removed_edges: continue
             new_n = set(no) - resolve_vars - var_to_resolve - set(get_dummies(no))
             original_n = clique_tup(no)
             if clique_tup(no) in existing_cliques_to_add:
@@ -355,29 +411,41 @@ def get_jt_update_instructions(
         if tg_c is not None:
             old_to_new_cliques[c] = old_to_new_cliques[tg_c]
     if create_new_clique:
-        clique = clique_tup({variable})
-        new_c = {variable}
-        new_connect_c = set(old_to_new_cliques[clique_to_connect_new_clique])
-        if clique_to_connect_new_clique in dummy_cliques:
-            new_connect_c = new_c
-            clique_to_connect_new_clique = clique
-        if len(new_c & new_connect_c) == 0:
-            d_var, cur_dummies = create_or_reuse_dummy(cur_dummies, dummy_used_times, new_connect_c)
-            new_c.add(d_var)
-            new_connect_c.add(d_var)
-        tnew_c = clique_tup(new_c)
-        tnew_connect_c = clique_tup(new_connect_c)
-        # print(f"creating new clique {tnew_c} connected to {tnew_connect_c}")
+        clique = clique_tup({variable} | set(members))
+        new_c = {variable} | set(members)
+        cards = jt.get_cardinality()
         map_clique_add.setdefault(clique,{})[variable] = new_var_states
-        old_to_new_cliques[clique] = tnew_c
-        old_to_new_cliques[clique_to_connect_new_clique] = tnew_connect_c
-        if tnew_connect_c != tnew_c:
-            new_edges.append((tnew_connect_c,tnew_c))
-            # print(f"    {(tnew_connect_c,tnew_c)}")
+        for m in members:
+            map_clique_add[clique][m] = cards[m]
+        if splice_edge is not None:
+            c1, c2 = splice_edge
+            tnew_c = clique_tup(new_c)
+            # print(f"creating new clique {tnew_c} spliced between {c1} and {c2}")
+            old_to_new_cliques[clique] = tnew_c
+            new_edges.append((old_to_new_cliques[c1],tnew_c))
+            new_edges.append((tnew_c,old_to_new_cliques[c2]))
+        else:
+            new_connect_c = set(old_to_new_cliques[clique_to_connect_new_clique])
+            if clique_to_connect_new_clique in dummy_cliques:
+                new_connect_c = new_c
+                clique_to_connect_new_clique = clique
+            if len(new_c & new_connect_c) == 0:
+                d_var, cur_dummies = create_or_reuse_dummy(cur_dummies, dummy_used_times, new_connect_c)
+                new_c.add(d_var)
+                new_connect_c.add(d_var)
+            tnew_c = clique_tup(new_c)
+            tnew_connect_c = clique_tup(new_connect_c)
+            # print(f"creating new clique {tnew_c} connected to {tnew_connect_c}")
+            old_to_new_cliques[clique] = tnew_c
+            old_to_new_cliques[clique_to_connect_new_clique] = tnew_connect_c
+            if tnew_connect_c != tnew_c:
+                new_edges.append((tnew_connect_c,tnew_c))
+                # print(f"    {(tnew_connect_c,tnew_c)}")
     # Edge construction
     for c in old_to_new_cliques.keys():
         if c in map_clique_add and c not in existing_cliques_to_add: continue
         for n in jt.neighbors(get_original_node(jt,c)):
+            if frozenset((c, clique_tup(n))) in removed_edges: continue
             new_c = old_to_new_cliques[c]
             new_n = old_to_new_cliques.get(n)
             # remove dummy or self loop
@@ -404,8 +472,9 @@ def get_resolve_instructions(jt, resolve):
     res = get_jt_update_instructions(jt, 'resolve', variable=resolve[0], value=resolve[1])
     return res['map_clique_resolve'], res['new_edges'], res['old_to_new_cliques']
 
-def get_add_variable_instructions(jt, new_var, new_var_states, cliques_to_add):
-    res = get_jt_update_instructions(jt, 'add', variable=new_var, new_var_states=new_var_states, cliques_to_add=cliques_to_add)
+def get_add_variable_instructions(jt, new_var, new_var_states, cliques_to_add, new_cluster=False, new_cluster_aliases=None):
+    res = get_jt_update_instructions(jt, 'add', variable=new_var, new_var_states=new_var_states, cliques_to_add=cliques_to_add,
+        new_cluster=new_cluster, new_cluster_aliases=new_cluster_aliases)
     return res['map_clique_resolve'], res['map_clique_add'], res['new_edges'], res['old_to_new_cliques']
 
 def resolve_jt(jt, map_clique_resolve, map_clique_add, new_edges, old_to_new_cliques):
@@ -445,13 +514,15 @@ def resolve_jt(jt, map_clique_resolve, map_clique_add, new_edges, old_to_new_cli
     for new_clique in missing_cliques:
         # print(f"evaluating missing cliques {new_clique}")
         if old_to_new_cliques[new_clique] in new_cliques_added: continue
-        vars_to_add_map = map_clique_add[new_clique]
+        vars_to_add_map = map_clique_add.get(new_clique,{})
         # print(f"  adding new clique {old_to_new_cliques[new_clique]}")
-        new_var = new_clique[0]
-        f = create_factor(new_var,vars_to_add_map[new_var])
-        new_vars = set(old_to_new_cliques[new_clique]) - {new_var}
-        for new_var in new_vars:
-            f.product(create_dummy_factor(new_var),inplace=True)
+        f = None
+        for new_var in old_to_new_cliques[new_clique]:
+            if new_var in vars_to_add_map:
+                fv = create_factor(new_var,vars_to_add_map[new_var])
+            else:
+                fv = create_dummy_factor(new_var)
+            f = fv if f is None else f.product(fv,inplace=False)
         new_factors.append(f)
 
     # print("=== DEBUG ===")
@@ -476,6 +547,7 @@ class ABAmm():
     _jt: JunctionTree
     _bp: BeliefPropagation
     _b: float
+    _max_states: int
     _amm_balance: float
     _initialized: bool
 
@@ -483,13 +555,14 @@ class ABAmm():
         self._amm_balance = 0
         self._initialized = False
 
-    def initialize(self, jt, b):
+    def initialize(self, jt, b, max_states):
         total_funds_required = b*sum([math.log(card) for card in jt.get_cardinality().values()])
         if total_funds_required > self.get_amm_balance():
             raise Exception(f"AMM has not enough balance to initialize ({self.get_amm_balance()} >= ({total_funds_required})")
         self._bp = BeliefPropagation(jt)
         self._bp.calibrate()
         self._b = b
+        self._max_states = max_states
         self._initialized = True
 
     def get_user_asset_block_dict(self, user_id):
@@ -801,7 +874,10 @@ class ABAmm():
         """
         if not self._initialized: raise Exception("AMM not initialized")
 
-        q_funds0 = transform_fund(self.get_user_free_funds(user_id), self._b)
+        funds0 = self.get_user_free_funds(user_id)
+        if funds0 / self._b > self._max_states:
+            funds0 = self._b * self._max_states
+        q_funds0 = transform_fund(funds0, self._b)
         vars_in_report = set(report['variables']) | set(report.get('evidence',{}))
 
         prob_fn = get_prob_fn(self._bp, report)
@@ -988,20 +1064,31 @@ class ABAmm():
             self._user_asset_blocks[user_id] = new_user_blocks
         return bp, user_ab_updates.keys()
 
-    def perform_add(self, new_var, new_var_states, cliques_to_add):
+    def perform_add(self, new_var, new_var_states, cliques, new_cluster=False, new_cluster_aliases=None):
         """
         Adds a variable in the global JT and all user JTs.
         This updates self._bp.junction_tree and all self._user_asset_blocks in place, atomically.
+        cliques: list of alias lists, each identifying an existing clique to absorb the variable into.
+        new_cluster: also create a new clique containing the variable.
+        new_cluster_aliases: existing variables included as members of the new clique (real separator).
         """
         if not self._initialized: raise Exception("AMM not initialized")
 
-        total_funds_required = self._b*sum([math.log(card) for card in self._bp.junction_tree.get_cardinality().values()])
+        cliques = cliques or []
+        new_cluster_aliases = list(new_cluster_aliases or [])
+        if len(cliques) == 0 and not new_cluster:
+            raise Exception("nothing to do: must specify cliques and/or new_cluster")
+
+        if new_var_states >= self._max_states:
+            raise Exception(f"Number of states exceed limit ({new_var_states} >= ({self._max_states})")
+
         total_funds_required = self._b*math.log(new_var_states)
         if total_funds_required > self.get_amm_balance():
             raise Exception(f"AMM has not enough balance to initialize ({self.get_amm_balance()} >= ({total_funds_required})")
 
         map_clique_resolve, map_clique_add, new_edges, old_to_new_cliques = \
-            get_add_variable_instructions(self._bp.junction_tree, new_var, new_var_states, cliques_to_add)
+            get_add_variable_instructions(self._bp.junction_tree, new_var, new_var_states, cliques,
+                new_cluster=new_cluster, new_cluster_aliases=new_cluster_aliases)
 
         try:
             # Global JT

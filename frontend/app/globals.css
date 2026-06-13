@@ -96,6 +96,99 @@
   margin-right: 4px;
 }
 
+/* Toast enter/exit */
+@keyframes cim-toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+@keyframes cim-toast-out {
+  to {
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+  }
+}
+.cim-toast-in {
+  animation: cim-toast-in 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+.cim-toast-out {
+  animation: cim-toast-out 0.18s ease-in forwards;
+}
+
+/* Staggered entrance for card grids: children fade/slide in one after the
+   other. Applied to a container; caps at 12 children to keep CSS short. */
+.stagger-children > * {
+  opacity: 0;
+  animation: fade-in 0.45s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+.stagger-children > *:nth-child(1) { animation-delay: 0ms; }
+.stagger-children > *:nth-child(2) { animation-delay: 35ms; }
+.stagger-children > *:nth-child(3) { animation-delay: 70ms; }
+.stagger-children > *:nth-child(4) { animation-delay: 105ms; }
+.stagger-children > *:nth-child(5) { animation-delay: 140ms; }
+.stagger-children > *:nth-child(6) { animation-delay: 175ms; }
+.stagger-children > *:nth-child(7) { animation-delay: 210ms; }
+.stagger-children > *:nth-child(8) { animation-delay: 245ms; }
+.stagger-children > *:nth-child(9) { animation-delay: 280ms; }
+.stagger-children > *:nth-child(10) { animation-delay: 315ms; }
+.stagger-children > *:nth-child(11) { animation-delay: 350ms; }
+.stagger-children > *:nth-child(12) { animation-delay: 385ms; }
+
+/* Interactive card lift shared by market cards and the featured hero. */
+.card-lift {
+  transition:
+    transform 0.25s cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.card-lift:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 32px -12px rgb(0 0 0 / 0.18);
+}
+.card-lift:active {
+  transform: translateY(0);
+}
+
+/* Skeleton shimmer */
+@keyframes cim-shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+.skeleton {
+  background: linear-gradient(
+    100deg,
+    var(--color-line2) 40%,
+    var(--color-line) 50%,
+    var(--color-line2) 60%
+  );
+  background-size: 200% 100%;
+  animation: cim-shimmer 1.6s linear infinite;
+  border-radius: 8px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-in,
+  .stagger-children > *,
+  .cim-toast-in,
+  .cim-toast-out {
+    animation-duration: 0.01ms;
+    animation-delay: 0ms;
+  }
+  .card-lift,
+  .card-lift:hover {
+    transition: none;
+    transform: none;
+  }
+}
+
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;

@@ -31,22 +31,9 @@ export interface VariableSummary {
   volume: number;
   volume_ss: number;
   n_operations: number;
-  info_url: string;
-}
-
-export interface MarketSummary {
-  variables: Record<
-    string,
-    {
-      states_probs: number[];
-      volume: number;
-      volume_ss: number;
-      n_operations: number;
-      info_url: string;
-    }
-  >;
-  nodes: string[][];
-  edges: [string[], string[]][];
+  // Where the numbers came from: the latest indexed ProbabilityUpdated
+  // notice ("event") or an authoritative cim_variable inspect ("query").
+  source?: "event" | "query";
 }
 
 export interface LiquidationReport {
@@ -67,13 +54,14 @@ export interface QueryResult {
   user_revenue_delta?: number;
 }
 
-// Variable info from info_url JSON
+// Variable info from /api/info/<alias>
 export interface VariableInfo {
   alias: string;
   name?: string;
   description?: string;
   states?: string[];
   category?: string;
+  tags?: string[];
   [key: string]: any;
 }
 

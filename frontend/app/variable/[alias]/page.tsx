@@ -27,9 +27,23 @@ import {
 export default function VariableDetailPage() {
   const params = useParams();
   const alias = decodeURIComponent(params.alias as string);
-  const { variables, graphNodes, ammB, infoMap, config, appAddress } = useApp();
+  const {
+    variables,
+    graphNodes,
+    ammB,
+    infoMap,
+    config,
+    appAddress,
+    ensureVariables,
+  } = useApp();
 
   const variable = variables.find((v) => v.alias === alias);
+
+  // Deep links land before the snapshot covers this alias; ensureVariables
+  // dedupes, so this is a no-op once the data is loaded.
+  useEffect(() => {
+    if (appAddress) ensureVariables([alias]);
+  }, [appAddress, alias, ensureVariables]);
   const market = useMemo(
     () =>
       variable ? buildMarket(variable, infoMap[alias], graphNodes, ammB) : null,
@@ -117,6 +131,13 @@ export default function VariableDetailPage() {
     if (appAddress) fetchHistory();
   }, [appAddress, fetchHistory]);
 
+  // A trade moves the target plus everything sharing its cliques (evidence
+  // included), so force-refresh those and the history chart.
+  const handleReported = useCallback(() => {
+    fetchHistory();
+    ensureVariables([alias, ...(market?.related ?? [])], { force: true });
+  }, [fetchHistory, ensureVariables, alias, market]);
+
   if (!market) {
     return (
       <div className="max-w-[700px] mx-auto my-20 px-7 text-center">
@@ -144,7 +165,7 @@ export default function VariableDetailPage() {
   );
 
   return (
-    <div className="px-7 pt-6 pb-14 max-w-[1500px] mx-auto grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_380px] gap-7 items-start animate-in">
+    <div className="px-4 md:px-7 pt-6 pb-14 max-w-[1500px] mx-auto grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_380px] gap-7 items-start animate-in">
       <div className="min-w-0 flex flex-col gap-[18px]">
         {/* Breadcrumb */}
         <div className="text-[13px] text-ink3">
@@ -183,6 +204,11 @@ export default function VariableDetailPage() {
               isConditional={isConditional}
               evidence={evidence}
               relatedMarkets={relatedMarkets}
+              stateName={
+                (probs[0] ?? 0) > 50
+                  ? market.states[0].name
+                  : market.states[1].name
+              }
             />
           )}
         </div>
@@ -292,14 +318,14 @@ export default function VariableDetailPage() {
         {/* Stat grid */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           {[
-            ["Volume", `${market.volume.toFixed(2)} ETH`, "buy side"],
+            ["Volume", `${market.volume.toFixed(4)} ETH`, "buy side"],
             ["Reports", market.ops.toLocaleString(), "total"],
             [
               "Liquidity b",
               market.b ? `${market.b.toFixed(4)} ETH` : "—",
               "LMSR",
             ],
-            ["Short sell", `${market.volume_ss.toFixed(2)} ETH`, "volume"],
+            ["Short sell", `${market.volume_ss.toFixed(4)} ETH`, "volume"],
           ].map(([k, v, sub]) => (
             <div
               key={k}
@@ -445,7 +471,7 @@ export default function VariableDetailPage() {
         evidence={evidence}
         relatedMarkets={allMarkets}
         conditionalLoading={loading}
-        onReported={fetchHistory}
+        onReported={handleReported}
       />
     </div>
   );
@@ -457,12 +483,14 @@ function HeroNumber({
   isConditional,
   evidence,
   relatedMarkets,
+  stateName,
 }: {
   value: number;
   marginal: number;
   isConditional: boolean;
   evidence: Selection[];
   relatedMarkets: any[];
+  stateName: string;
 }) {
   const v = useAnimatedNumber(value);
   const delta = value - marginal;
@@ -479,7 +507,7 @@ function HeroNumber({
       {isConditional ? (
         <div className="mt-2 flex flex-col gap-1 items-end">
           <div className="text-xs text-accent-deep font-medium max-w-[240px] leading-snug text-right">
-            P(Yes) {plainEnglishEvidence(evidence, relatedMarkets)}
+            P({stateName}) {plainEnglishEvidence(evidence, relatedMarkets)}
           </div>
           <div className="text-[11px] text-ink3 font-mono flex items-center gap-1">
             <span className={delta >= 0 ? "text-accent" : "text-no"}>
@@ -490,7 +518,9 @@ function HeroNumber({
           </div>
         </div>
       ) : (
-        <div className="text-[11px] mt-1 text-ink3">P(Yes) · marginal</div>
+        <div className="text-[11px] mt-1 text-ink3">
+          P({stateName}) · marginal
+        </div>
       )}
     </div>
   );

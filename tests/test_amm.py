@@ -5,6 +5,7 @@ Tests the core AMM logic without the cartesapp framework.
 import math
 import pytest
 
+import networkx as nx
 from pgmpy.models import JunctionTree
 from pgmpy.factors.discrete import DiscreteFactor
 
@@ -21,7 +22,19 @@ def get_script_dir():
     return currentdir
 
 fix_import_path(f"{get_script_dir()}/..")
-from cim.auto_market_maker import ABAmm, create_dummy_factor, dummy_name, transform_fund, revert_fund
+from cim.auto_market_maker import ABAmm, create_dummy_factor, dummy_name, is_dummy_var, transform_fund, revert_fund
+
+
+def assert_rip(jt):
+    """Assert the junction tree is a tree and satisfies the running intersection property
+    (pgmpy only validates cycles, not RIP — a RIP violation calibrates silently but gives
+    wrong probabilities)."""
+    assert nx.is_tree(jt), "junction tree is not a tree"
+    for var in set(v for n in jt.nodes for v in n):
+        if is_dummy_var(var):
+            continue
+        sub = jt.subgraph([n for n in jt.nodes if var in n])
+        assert nx.is_connected(sub), f"running intersection property violated for {var}"
 
 
 def fresh_amm():
@@ -298,13 +311,14 @@ class TestAmmAdd:
         assert factor is not None
 
     def test_add_variable_unconnected(self, amm):
-        amm.perform_add("standalone", 2, [None])
+        amm.perform_add("standalone", 2, [], new_cluster=True)
         factor = amm.query(["standalone"])
         assert factor is not None
         # New binary variable should be uniform
         for i in range(2):
             s = dict(factor.assignment([i])[0])
             assert math.isclose(factor.get_value(**s), 0.5, abs_tol=0.01)
+        assert_rip(amm._bp.junction_tree)
 
     def test_add_variable_insufficient_amm_funds(self):
         amm = fresh_amm()
@@ -314,7 +328,7 @@ class TestAmmAdd:
         # Drain AMM balance
         amm._amm_balance = 0
         with pytest.raises(Exception, match="not enough balance"):
-            amm.perform_add("x", 2, [None])
+            amm.perform_add("x", 2, [], new_cluster=True)
 
     def test_add_existing_variable_raises(self, amm):
         with pytest.raises(Exception, match="existing variable"):
@@ -329,6 +343,125 @@ class TestAmmAdd:
         factor = amm.query(variables={"newvar": 1})
         p = factor.get_value(**{"newvar": 1})
         assert math.isclose(p, 0.6, abs_tol=0.05)
+
+    def test_add_nothing_to_do_raises(self, amm):
+        with pytest.raises(Exception, match="nothing to do"):
+            amm.perform_add("newvar", 2, [])
+
+    def test_add_members_without_new_cluster_raises(self, amm):
+        with pytest.raises(Exception, match="new_cluster is false"):
+            amm.perform_add("newvar", 2, [["lung"]], new_cluster_aliases=["asia"])
+
+    def test_add_more_than_three_cliques(self, amm):
+        """The old 3-clique limit is lifted: absorb into 4 mutually connected cliques."""
+        amm.perform_add("newvar", 2, [
+            ["asia", "tub"],
+            ["tub", "either"],
+            ["bronc", "either", "lung"],
+            ["bronc", "lung", "smoke"],
+        ])
+        assert amm.query(["newvar"]) is not None
+        assert_rip(amm._bp.junction_tree)
+
+    def test_add_new_cluster_with_member_real_separator(self, amm):
+        """A new cluster with an existing member joins via a real separator (no dummy)."""
+        amm.perform_add("newvar", 2, [], new_cluster=True, new_cluster_aliases=["asia"])
+        jt = amm._bp.junction_tree
+        assert ("asia", "newvar") in jt.nodes
+        assert jt.has_edge(("asia", "newvar"), ("asia", "tub"))
+        assert not any(is_dummy_var(v) for v in ("asia", "newvar"))
+        assert_rip(jt)
+        # Joint starts uniform, existing marginal preserved
+        joint = amm.query(["newvar", "asia"])
+        for i in range(4):
+            s = dict(joint.assignment([i])[0])
+            assert math.isclose(joint.get_value(**s), 0.25, abs_tol=0.01)
+        marg = amm.query(["asia"])
+        s = dict(marg.assignment([0])[0])
+        assert math.isclose(marg.get_value(**s), 0.5, abs_tol=0.01)
+
+    def test_add_new_cluster_member_dependence_tradeable(self, amm):
+        """The real separator carries real dependence: a conditional edit on the member
+        shifts P(newvar|member) without touching the other member state (impossible
+        through a dummy/independence link)."""
+        amm.perform_add("newvar", 2, [], new_cluster=True, new_cluster_aliases=["asia"])
+        amm.deposit_funds(0, 200)
+        report = {"variables": {"newvar": 1}, "evidence": {"asia": 1}, "value": 0.8}
+        amm.perform_edit(report, user_id=0)
+        p_cond1 = amm.query(variables={"newvar": 1}, evidence={"asia": 1}).get_value(newvar=1)
+        p_cond0 = amm.query(variables={"newvar": 1}, evidence={"asia": 0}).get_value(newvar=1)
+        assert math.isclose(p_cond1, 0.8, abs_tol=0.05)
+        assert math.isclose(p_cond0, 0.5, abs_tol=0.05)
+
+    def test_add_new_cluster_members_marginals_unchanged(self, amm):
+        """All-ones initialization of the new clique must not distort existing joints."""
+        before = {}
+        joint = amm.query(["bronc", "lung"])
+        for i in range(4):
+            s = dict(joint.assignment([i])[0])
+            before[tuple(sorted(s.items()))] = joint.get_value(**s)
+        amm.perform_add("newvar", 2, [], new_cluster=True, new_cluster_aliases=["lung", "bronc"])
+        joint = amm.query(["bronc", "lung"])
+        for i in range(4):
+            s = dict(joint.assignment([i])[0])
+            assert math.isclose(joint.get_value(**s), before[tuple(sorted(s.items()))], abs_tol=0.01)
+        newvar = amm.query(["newvar"])
+        s = dict(newvar.assignment([0])[0])
+        assert math.isclose(newvar.get_value(**s), 0.5, abs_tol=0.01)
+        assert_rip(amm._bp.junction_tree)
+
+    def test_add_new_cluster_splice_adjacent(self, amm):
+        """Members spanning two adjacent cliques splice the new clique onto their edge."""
+        amm.perform_add("newvar", 2, [], new_cluster=True,
+                        new_cluster_aliases=["asia", "tub", "either"])
+        jt = amm._bp.junction_tree
+        n = ("asia", "either", "newvar", "tub")
+        assert n in jt.nodes
+        assert not jt.has_edge(("asia", "tub"), ("either", "lung", "tub"))
+        assert jt.has_edge(("asia", "tub"), n)
+        assert jt.has_edge(n, ("either", "lung", "tub"))
+        assert_rip(jt)
+        for alias in ["asia", "tub", "either"]:
+            marg = amm.query([alias])
+            s = dict(marg.assignment([0])[0])
+            assert math.isclose(marg.get_value(**s), 0.5, abs_tol=0.01)
+        assert amm.query(["newvar", "asia"]) is not None
+
+    def test_add_new_cluster_non_adjacent_members_raises(self, amm):
+        with pytest.raises(Exception, match="loop|running intersection"):
+            amm.perform_add("newvar", 2, [], new_cluster=True,
+                            new_cluster_aliases=["asia", "xray"])
+
+    def test_add_new_cluster_member_does_not_exist_raises(self, amm):
+        with pytest.raises(Exception, match="does not exist"):
+            amm.perform_add("newvar", 2, [], new_cluster=True, new_cluster_aliases=["ghost"])
+
+    def test_add_mixing_absorb_and_new_cluster(self, amm):
+        """Absorb into a clique and create a new cluster in one call; the new clique
+        connects through the shared new variable, not a dummy."""
+        amm.perform_add("newvar", 2, [["asia", "tub"]], new_cluster=True)
+        jt = amm._bp.junction_tree
+        assert ("asia", "newvar", "tub") in jt.nodes
+        assert ("newvar",) in jt.nodes
+        assert jt.has_edge(("asia", "newvar", "tub"), ("newvar",))
+        assert_rip(jt)
+        assert amm.query(["newvar", "asia"]) is not None
+
+    def test_add_mixing_with_members(self, amm):
+        """Members whose home clique is one of the absorbed cliques are valid."""
+        amm.perform_add("newvar", 2, [["asia", "tub"]], new_cluster=True,
+                        new_cluster_aliases=["asia"])
+        jt = amm._bp.junction_tree
+        assert ("asia", "newvar", "tub") in jt.nodes
+        assert ("asia", "newvar") in jt.nodes
+        assert jt.has_edge(("asia", "newvar", "tub"), ("asia", "newvar"))
+        assert_rip(jt)
+
+    def test_add_mixing_with_members_rip_conflict_raises(self, amm):
+        """Members living in a clique unrelated to the absorbed cliques would break RIP."""
+        with pytest.raises(Exception, match="running intersection"):
+            amm.perform_add("newvar", 2, [["xray"]], new_cluster=True,
+                            new_cluster_aliases=["asia"])
 
 
 # --- Edge cases ---

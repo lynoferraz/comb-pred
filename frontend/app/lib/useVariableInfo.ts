@@ -1,26 +1,37 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
-import type { VariableInfo, VariableSummary } from "./cartesi";
+import { useState, useEffect } from "react";
+import type { VariableInfo } from "./cartesi";
+
+// Variable metadata comes from the local /api/info/<alias> route (bundled
+// market models with a registry fallback), addressable by alias alone — no
+// on-chain info_url needed.
+function infoUrlFor(alias: string): string {
+  return `/api/info/${alias}`;
+}
 
 // In-memory cache shared across hook instances within the same page lifecycle
 const infoCache: Record<string, VariableInfo | null> = {};
 
-export function useVariableInfoMap(variables: VariableSummary[]): Record<string, VariableInfo | null> {
-  const [infoMap, setInfoMap] = useState<Record<string, VariableInfo | null>>({});
+export function useVariableInfoMap(
+  aliases: string[],
+): Record<string, VariableInfo | null> {
+  const [infoMap, setInfoMap] = useState<Record<string, VariableInfo | null>>(
+    {},
+  );
 
   useEffect(() => {
-    if (variables.length === 0) return;
+    if (aliases.length === 0) return;
     let cancelled = false;
 
     const fetchAll = async () => {
       const updates: Record<string, VariableInfo | null> = {};
-      const toFetch = variables.filter((v) => v.info_url && !(v.alias in infoCache));
+      const toFetch = aliases.filter((alias) => !(alias in infoCache));
 
       // Return cached immediately
-      for (const v of variables) {
-        if (v.alias in infoCache) {
-          updates[v.alias] = infoCache[v.alias];
+      for (const alias of aliases) {
+        if (alias in infoCache) {
+          updates[alias] = infoCache[alias];
         }
       }
       if (Object.keys(updates).length > 0 && !cancelled) {
@@ -29,22 +40,22 @@ export function useVariableInfoMap(variables: VariableSummary[]): Record<string,
 
       // Fetch missing
       await Promise.all(
-        toFetch.map(async (v) => {
+        toFetch.map(async (alias) => {
           try {
-            const res = await fetch(v.info_url);
+            const res = await fetch(infoUrlFor(alias));
             if (!res.ok) throw new Error("not ok");
             const data = await res.json();
-            infoCache[v.alias] = data as VariableInfo;
+            infoCache[alias] = data as VariableInfo;
           } catch {
-            infoCache[v.alias] = null;
+            infoCache[alias] = null;
           }
         }),
       );
 
       if (!cancelled) {
         const allUpdates: Record<string, VariableInfo | null> = {};
-        for (const v of variables) {
-          allUpdates[v.alias] = infoCache[v.alias] ?? null;
+        for (const alias of aliases) {
+          allUpdates[alias] = infoCache[alias] ?? null;
         }
         setInfoMap(allUpdates);
       }
@@ -52,22 +63,23 @@ export function useVariableInfoMap(variables: VariableSummary[]): Record<string,
 
     fetchAll();
     return () => { cancelled = true; };
-  }, [variables]);
+  }, [aliases]);
 
   return infoMap;
 }
 
-export function useVariableInfo(alias: string, infoUrl?: string): VariableInfo | null {
-  const [info, setInfo] = useState<VariableInfo | null>(infoCache[alias] ?? null);
+export function useVariableInfo(alias: string): VariableInfo | null {
+  const [info, setInfo] = useState<VariableInfo | null>(
+    infoCache[alias] ?? null,
+  );
 
   useEffect(() => {
-    if (!infoUrl) return;
     if (alias in infoCache) {
       setInfo(infoCache[alias]);
       return;
     }
     let cancelled = false;
-    fetch(infoUrl)
+    fetch(infoUrlFor(alias))
       .then((r) => {
         if (!r.ok) throw new Error("not ok");
         return r.json();
@@ -81,7 +93,7 @@ export function useVariableInfo(alias: string, infoUrl?: string): VariableInfo |
         if (!cancelled) setInfo(null);
       });
     return () => { cancelled = true; };
-  }, [alias, infoUrl]);
+  }, [alias]);
 
   return info;
 }

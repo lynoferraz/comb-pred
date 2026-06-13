@@ -3,30 +3,40 @@ import math
 
 from cartesapp.storage import Storage
 from cartesapp.setup import post_setup
-from cartesapplib.wallet import app_wallet
+from cartesapp.context import Context, get_metadata, get_low_level_rollup, get_ledger
 
 from .core_settings import CoreSettings
 from .auto_market_maker import ABAmm
 from .jt_serializer import save_amm_state, load_amm_state
 
 def _get_amm_balance() -> float:
-    return app_wallet.get_wallet(CoreSettings().amm_id).get_ether_balance()
+    ledger = get_ledger()
+    asset_id = CoreSettings().ether_id
+    account_info = ledger.retrieve_account(account=CoreSettings().amm_id)
+    return math.floor(ledger.balance(asset_id, account_info['account_id'])/CoreSettings().precision_div)
 def _get_user_free_funds(user_id):
-    return app_wallet.get_wallet(user_id).get_ether_balance()
+    ledger = get_ledger()
+    asset_id = CoreSettings().ether_id
+    account_info = ledger.retrieve_account(account=user_id)
+    return math.floor(ledger.balance(asset_id, account_info['account_id'])/CoreSettings().precision_div)
 def _update_amm_balance(delta):
-    wallet = app_wallet.get_wallet(CoreSettings().amm_id)
-    delta = math.floor(delta)
+    ledger = get_ledger()
+    asset_id = CoreSettings().ether_id
+    account_info = ledger.retrieve_account(account=CoreSettings().amm_id)
+    delta = math.floor(delta) * CoreSettings().precision_div
     if delta < 0:
-        wallet.withdraw_ether(-delta)
+        ledger.withdraw(asset_id, account_info['account_id'], -delta)
     else:
-        wallet.deposit_ether(delta)
+        ledger.deposit(asset_id, account_info['account_id'], delta)
 def _update_user_balance(user_id, delta):
-    wallet = app_wallet.get_wallet(user_id)
-    delta = math.floor(delta)
+    ledger = get_ledger()
+    asset_id = CoreSettings().ether_id
+    account_info = ledger.retrieve_account(account=user_id)
+    delta = math.floor(delta) * CoreSettings().precision_div
     if delta < 0:
-        wallet.withdraw_ether(-delta)
+        ledger.withdraw(asset_id, account_info['account_id'], -delta)
     else:
-        wallet.deposit_ether(delta)
+        ledger.deposit(asset_id, account_info['account_id'], delta)
 
 class Model:
     initialized = False

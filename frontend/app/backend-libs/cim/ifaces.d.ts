@@ -6,35 +6,24 @@
  */
 
 export interface _Master_ {
-  ProbabilityUpdated: ProbabilityUpdated;
-  ResolveVariablePayload: ResolveVariablePayload;
-  UserInfoPayload: UserInfoPayload;
-  InitializePayload: InitializePayload;
-  UserBalance: UserBalance;
-  QueryVariablesPayload: QueryVariablesPayload;
-  SetOperatorPayload: SetOperatorPayload;
-  AddVariablePayload: AddVariablePayload;
   VariableCreated: VariableCreated;
+  UserBalance: UserBalance;
+  VariablesPayload: VariablesPayload;
+  SetOperatorPayload: SetOperatorPayload;
+  UserInfoPayload: UserInfoPayload;
   VariableResolved: VariableResolved;
+  ResolveVariablePayload: ResolveVariablePayload;
   EditVariablesPayload: EditVariablesPayload;
   EmptyClass: EmptyClass;
+  ProbabilityUpdated: ProbabilityUpdated;
+  QueryVariablesPayload: QueryVariablesPayload;
+  AddVariablePayload: AddVariablePayload;
+  InitializePayload: InitializePayload;
 }
-export interface ProbabilityUpdated {
+export interface VariableCreated {
   alias: string;
-  probabilities: number[];
-  volume: number;
-  volume_ss: number;
-  timestamp: number;
-}
-export interface ResolveVariablePayload {
-  alias: string;
-  state: number;
-}
-export interface UserInfoPayload {
-  user_address: string;
-}
-export interface InitializePayload {
-  b: number;
+  n_states: number;
+  created_at: number;
 }
 export interface UserBalance {
   user: string;
@@ -42,35 +31,23 @@ export interface UserBalance {
   expected: number;
   timestamp: number;
 }
-export interface QueryVariablesPayload {
-  var_aliases: string[];
-  var_states: number[];
-  evidence_aliases?: string[] | null;
-  evidence_states?: number[] | null;
-  value?: number | null;
-  user_address?: string | null;
+export interface VariablesPayload {
+  alias: string;
 }
 export interface SetOperatorPayload {
   new_operator_address: string;
 }
-export interface AddVariablePayload {
-  alias: string;
-  n_states: number;
-  resolve_address: string;
-  related_aliases: string[];
-  related_aliases2: string[];
-  related_aliases3: string[];
-  info_url: string;
-}
-export interface VariableCreated {
-  alias: string;
-  n_states: number;
-  created_at: number;
+export interface UserInfoPayload {
+  user_address: string;
 }
 export interface VariableResolved {
   alias: string;
   final_state: number;
   timestamp: number;
+}
+export interface ResolveVariablePayload {
+  alias: string;
+  state: number;
 }
 export interface EditVariablesPayload {
   value: number;
@@ -81,3 +58,33 @@ export interface EditVariablesPayload {
   evidence_states: number[];
 }
 export interface EmptyClass {}
+export interface ProbabilityUpdated {
+  alias: string;
+  probabilities: number[];
+  volume: number;
+  volume_ss: number;
+  timestamp: number;
+}
+export interface QueryVariablesPayload {
+  var_aliases: string[];
+  var_states: number[];
+  evidence_aliases?: string[] | null;
+  evidence_states?: number[] | null;
+  value?: number | null;
+  user_address?: string | null;
+}
+export interface AddVariablePayload {
+  alias: string;
+  n_states: number;
+  resolve_address: string;
+  cliques: CliqueAliases[];
+  new_cluster: boolean;
+  new_cluster_aliases: string[];
+  info_url: string;
+}
+export interface CliqueAliases {
+  aliases: string[];
+}
+export interface InitializePayload {
+  b: number;
+}

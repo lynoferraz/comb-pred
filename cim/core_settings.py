@@ -11,15 +11,26 @@ from cartesapp.utils import str2bytes
 
 class CoreSettings:
     initialized = False
-    configs_to_store = ['initialized','operator_address', 'admin_address', 'amm_id']
+    configs_to_store = ['initialized','operator_address', 'admin_address', 'amm_id', 'precision_div', 'max_variable_states']
     def __new__(cls):
         # load configuration on reder node
         if not cls.initialized:
-            cls.version = os.getenv('RIVES_VERSION') or '0'
+            cls.version = os.getenv('CIM_VERSION') or '0'
             cls.admin_address = (os.getenv('ADMIN_ADDRESS') or "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266").lower()
-            cls.operator_address = cls.admin_address
+            cls.operator_address = (os.getenv('OPERATOR_ADDRESS') or cls.admin_address).lower()
             cls.amm_id = cls.admin_address
+            cls.precision_div = int(os.getenv('CIM_PRECISION_DIV')) if os.getenv('CIM_PRECISION_DIV') is not None else 1_000_000_000_000
+            cls.max_variable_states = int(os.getenv('CIM_MAX_STATES')) if os.getenv('CIM_PRECISION_DIV') is not None else 50
             cls.initialized = True
+
+            asset_id = 0
+            from cartesapp.context import get_ledger
+            ledger = get_ledger()
+            if ledger is not None:
+                asset_info = ledger.retrieve_asset(base_token=True, force_find=True)
+                asset_id = asset_info['asset_id']
+            cls.ether_id = asset_id
+
         return cls
 
     @classmethod
