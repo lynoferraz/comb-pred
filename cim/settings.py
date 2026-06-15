@@ -27,7 +27,7 @@ CASE_INSENSITIVITY_LIKE = True
 NOTICE_FORMAT = "header_abi"
 
 DISABLED_ENDPOINTS = [
-    'ledger.deposit_ether',
+    'ledger.deposit_ether','ledger.TransferEther','ledger.WithdrawEther',
     'ledger.deposit_erc20','ledger.WithdrawErc20','ledger.TransferErc20',
     'ledger.deposit_erc721','ledger.WithdrawErc721','ledger.TransferErc721',
     'ledger.deposit_erc1155_single','ledger.WithdrawErc1155Single','ledger.TransferErc1155Single',

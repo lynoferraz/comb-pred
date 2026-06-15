@@ -9,10 +9,10 @@ from typing import Optional, List
 from cartesi.abi import Address, UInt, Bytes32, String, Int, Bool
 
 from cartesapp.input import query, mutation
-from cartesapp.output import add_output, event, emit_event, index_input
+from cartesapp.output import add_output, event, emit_event, index_input, submit_contract_call
 from cartesapp.context import get_metadata, get_ledger
 from cartesapp.storage import Entity, helpers
-from cartesapplib.ledger.app_ledger import ETHER_PORTAL_ADDRESS, DepositEtherPayload
+from cartesapplib.ledger.app_ledger import ETHER_PORTAL_ADDRESS, DepositEtherPayload, WITHDRAW_ETHER, WithdrawEtherPayload
 
 from .core_settings import CoreSettings
 from .model import Model
@@ -163,21 +163,59 @@ def deposit_ether(payload: DepositEtherPayload) -> bool:
     ledger.deposit(CoreSettings().ether_id, account_info['account_id'], payload.amount)
 
     u_tags = ['deposit','balance',payload.sender]
-    expected = 0
+    free_funds = Model().amm.get_user_free_funds(account_info['account'])
+    expected = free_funds
     if Model().amm._initialized:
         expected = Model().amm.get_expected_funds_value(payload.sender)
     uev = UserBalance(
         user        = payload.sender,
-        free_funds  = Model().amm.get_user_free_funds(payload.sender),
-        expected    = expected,
+        free_funds  = free_funds * CoreSettings().precision_div,
+        expected    = expected * CoreSettings().precision_div,
         timestamp   = metadata.block_timestamp
     )
     emit_event(uev,tags=u_tags)
     LOGGER.debug(f"{payload.sender} deposited {payload.amount} ether (wei)")
     return True
 
-# TODO: withdraw substitute to avoid amm admin withdrawing more than allowed to fund its variables
+@mutation(fixed_header=WITHDRAW_ETHER)
+def WithdrawEther(payload: WithdrawEtherPayload) -> bool:
+    metadata = get_metadata()
+    ledger = get_ledger()
+    account_info = ledger.retrieve_account(account=metadata.msg_sender)
 
+    if metadata.msg_sender == CoreSettings().amm_id:
+        asset_id = CoreSettings().ether_id
+        balance = ledger.balance(asset_id, account_info['account_id'])
+
+        total_funds_required = Model().amm._b*math.log(Model().amm.get_total_number_of_states()) * CoreSettings().precision_div
+        if balance - payload.amount < total_funds_required:
+            raise Exception(f"AMM can't withdraw, not enough balance ({balance} - {payload.amount} < ({total_funds_required})")
+
+    ledger.withdraw(CoreSettings().ether_id, account_info['account_id'], payload.amount)
+
+    account_info2 = ledger.retrieve_account(account_id=account_info['account_id'])
+    if account_info2["n_balances"] == 0:
+        ledger.retrieve_account(account_id=account_info2['account_id'], remove=True)
+
+    submit_contract_call(
+        account_info['account'], payload.amount,
+        tags=["ledger", "ether", "withdrawal", account_info['account']],
+    )
+    u_tags = ['withdrawal','balance',account_info['account']]
+    free_funds = Model().amm.get_user_free_funds(account_info['account'])
+    expected = free_funds
+    if Model().amm._initialized:
+        expected = Model().amm.get_expected_funds_value(account_info['account'])
+    uev = UserBalance(
+        user        = account_info['account'],
+        free_funds  = free_funds * CoreSettings().precision_div,
+        expected    = expected * CoreSettings().precision_div,
+        timestamp   = metadata.block_timestamp
+    )
+    emit_event(uev,tags=u_tags)
+
+    LOGGER.debug(f"{account_info['account']} withdrew {payload.amount} ether (wei)")
+    return True
 
 @mutation()
 def initialize_amm(payload: InitializePayload) -> bool:
@@ -305,8 +343,8 @@ def resolve_variable(payload: ResolveVariablePayload) -> bool:
         u_tags.extend(tags)
         uev = UserBalance(
             user        = user,
-            free_funds  = Model().amm.get_user_free_funds(user),
-            expected    = Model().amm.get_expected_funds_value(user),
+            free_funds  = Model().amm.get_user_free_funds(user) * CoreSettings().precision_div,
+            expected    = Model().amm.get_expected_funds_value(user) * CoreSettings().precision_div,
             timestamp   = metadata.block_timestamp
         )
         emit_event(uev,tags=u_tags)

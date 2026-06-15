@@ -630,6 +630,12 @@ class ABAmm():
         self._update_user_balance(user_id, delta)
         self._update_amm_balance(-delta)
 
+    def get_total_number_of_states(self):
+        variables = set()
+        for f in self._bp.junction_tree.factors:
+            variables.update(zip(f.variables,f.cardinality))
+        return int(sum(v[1] for v in variables))
+
     def query(self, variables, evidence={}, user_id=None):
         if not self._initialized: raise Exception("AMM not initialized")
         if user_id is not None:
@@ -1082,9 +1088,9 @@ class ABAmm():
         if new_var_states >= self._max_states:
             raise Exception(f"Number of states exceed limit ({new_var_states} >= ({self._max_states})")
 
-        total_funds_required = self._b*math.log(new_var_states)
+        total_funds_required = self._b*math.log(new_var_states+self.get_total_number_of_states())
         if total_funds_required > self.get_amm_balance():
-            raise Exception(f"AMM has not enough balance to initialize ({self.get_amm_balance()} >= ({total_funds_required})")
+            raise Exception(f"AMM has not enough balance to add var ({self.get_amm_balance()} < ({total_funds_required})")
 
         map_clique_resolve, map_clique_add, new_edges, old_to_new_cliques = \
             get_add_variable_instructions(self._bp.junction_tree, new_var, new_var_states, cliques,

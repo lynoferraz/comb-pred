@@ -38,7 +38,7 @@ export async function listEtherWithdrawals(
   // are stored lowercase.
   const indexerOutput: any = await indexerQuery(
     {
-      tags: ["wallet", "ether", "withdrawal", userAddress.toLowerCase()],
+      tags: ["ledger", "ether", "withdrawal", userAddress.toLowerCase()],
       type: "voucher",
       order_by: "input_index",
       order_dir: "desc",
