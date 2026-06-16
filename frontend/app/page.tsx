@@ -1,38 +1,75 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useApp } from "./lib/context";
-import { buildMarkets } from "./lib/market";
+import { buildMarketsFromAliases } from "./lib/market";
 import MarketCard from "./components/market/MarketCard";
 import FeaturedCard from "./components/market/FeaturedCard";
 import { MarketGridSkeleton } from "./components/ui/Skeleton";
-import { Search, RefreshCw } from "lucide-react";
+import { Search } from "lucide-react";
+
+const PAGE_SIZE = 24;
+// One listing fetch covers this many variables; we page through if there are
+// more. The listing is a cheap entity read (no belief propagation), so a wide
+// page keeps it to a single round trip in practice.
+const LIST_PAGE = 200;
 
 export default function Home() {
   const {
-    variables,
+    aliases,
+    marketData,
     graphNodes,
     ammB,
     infoMap,
     loading,
     error,
-    refresh,
     appAddress,
+    ensureProbabilities,
+    listVariables,
   } = useApp();
 
   const [search, setSearch] = useState("");
   const [cat, setCat] = useState("All");
   const [sort, setSort] = useState("Volume");
 
-  // Render the grid in pages; filtering/sorting still runs over the full
-  // market list, this only caps how many cards are mounted.
-  const PAGE_SIZE = 24;
-  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
-  useEffect(() => setVisibleCount(PAGE_SIZE), [search, cat, sort]);
+  // Load the cheap lightweight listing (volume/activity/n_states for every
+  // variable, no probabilities) so sorting/filtering is globally correct.
+  // Probabilities themselves stay lazy, loaded only for the visible cards.
+  const [listLoading, setListLoading] = useState(false);
+  const listRequested = useRef(false);
+  useEffect(() => {
+    if (!appAddress || listRequested.current) return;
+    listRequested.current = true;
+    let cancelled = false;
+    (async () => {
+      setListLoading(true);
+      try {
+        let page = 1;
+        for (;;) {
+          const res = await listVariables({
+            orderBy: "volume",
+            orderDir: "desc",
+            page,
+            pageSize: LIST_PAGE,
+          });
+          if (cancelled) return;
+          if (res.aliases.length < LIST_PAGE || page * LIST_PAGE >= res.total)
+            break;
+          page++;
+        }
+      } finally {
+        if (!cancelled) setListLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [appAddress, listVariables]);
 
+  // Full universe, enriched with the listing's volume/activity.
   const markets = useMemo(
-    () => buildMarkets(variables, infoMap, graphNodes, ammB),
-    [variables, infoMap, graphNodes, ammB],
+    () => buildMarketsFromAliases(aliases, marketData, infoMap, graphNodes, ammB),
+    [aliases, marketData, infoMap, graphNodes, ammB],
   );
 
   const cats = useMemo(() => {
@@ -63,11 +100,28 @@ export default function Home() {
     return list;
   }, [markets, cat, search, sort]);
 
+  // Page in memory; only the cards that are actually rendered get their
+  // probabilities loaded.
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  useEffect(() => setVisibleCount(PAGE_SIZE), [search, cat, sort]);
+
+  const visible = filtered.slice(0, visibleCount);
+  useEffect(() => {
+    ensureProbabilities(visible.map((m) => m.alias));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filtered, visibleCount, ensureProbabilities]);
+
   const featured = useMemo(
     () => [...markets].sort((a, b) => b.volume - a.volume)[0],
     [markets],
   );
   const showFeatured = !search && cat === "All" && featured;
+  // Featured needs its probabilities too.
+  useEffect(() => {
+    if (showFeatured) ensureProbabilities([featured.alias]);
+  }, [showFeatured, featured, ensureProbabilities]);
+
+  const initialLoading = (loading || listLoading) && markets.length === 0;
 
   return (
     <div className="px-4 md:px-7 pt-10 pb-14 max-w-[1500px] mx-auto animate-in">
@@ -91,14 +145,6 @@ export default function Home() {
               className="bg-transparent border-0 outline-none flex-1 text-[13px] text-ink"
             />
           </div>
-          <button
-            onClick={refresh}
-            disabled={loading || !appAddress}
-            title="Refresh"
-            className="p-2.5 rounded-full border border-line text-ink2 hover:bg-line2 disabled:opacity-50 transition-colors"
-          >
-            <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
-          </button>
         </div>
       </div>
 
@@ -143,7 +189,7 @@ export default function Home() {
       {showFeatured && <FeaturedCard m={featured} />}
 
       {/* Grid */}
-      {loading && markets.length === 0 ? (
+      {initialLoading ? (
         <MarketGridSkeleton />
       ) : filtered.length === 0 ? (
         <div className="p-16 text-center text-ink3 bg-surface rounded-card border border-line">
@@ -161,7 +207,7 @@ export default function Home() {
       ) : (
         <>
           <div className="grid gap-3.5 [grid-template-columns:repeat(auto-fill,minmax(min(380px,100%),1fr))] stagger-children">
-            {filtered.slice(0, visibleCount).map((m) => (
+            {visible.map((m) => (
               <MarketCard key={m.alias} m={m} />
             ))}
           </div>

@@ -7,7 +7,7 @@ import { useApp } from "../../lib/context";
 import { getInspectOptions, PRECISION_FACTOR } from "../../lib/cartesi";
 import {
   buildMarket,
-  buildMarkets,
+  buildMarketsFromAliases,
   plainEnglishEvidence,
   evidenceCandidates,
   type ProbPoint,
@@ -23,36 +23,39 @@ import {
   ProbabilityAreaChart,
   MultiLineChart,
 } from "../../components/ui/Charts";
+import { RefreshCw } from "lucide-react";
 
 export default function VariableDetailPage() {
   const params = useParams();
   const alias = decodeURIComponent(params.alias as string);
   const {
-    variables,
+    aliases,
+    marketData,
     graphNodes,
     ammB,
     infoMap,
     config,
     appAddress,
     ensureVariables,
+    refreshUserInfo,
   } = useApp();
 
-  const variable = variables.find((v) => v.alias === alias);
-
-  // Deep links land before the snapshot covers this alias; ensureVariables
+  // Deep links land before any data covers this alias; ensureVariables
   // dedupes, so this is a no-op once the data is loaded.
   useEffect(() => {
     if (appAddress) ensureVariables([alias]);
   }, [appAddress, alias, ensureVariables]);
+
+  // Built from info immediately (state names, category); probabilities fill
+  // in once the inspect above resolves.
   const market = useMemo(
-    () =>
-      variable ? buildMarket(variable, infoMap[alias], graphNodes, ammB) : null,
-    [variable, infoMap, alias, graphNodes, ammB],
+    () => buildMarket(alias, marketData[alias], infoMap[alias], graphNodes, ammB),
+    [marketData, infoMap, alias, graphNodes, ammB],
   );
 
   const allMarkets = useMemo(
-    () => buildMarkets(variables, infoMap, graphNodes, ammB),
-    [variables, infoMap, graphNodes, ammB],
+    () => buildMarketsFromAliases(aliases, marketData, infoMap, graphNodes, ammB),
+    [aliases, marketData, infoMap, graphNodes, ammB],
   );
   const relatedMarkets = useMemo(
     () =>
@@ -95,6 +98,10 @@ export default function VariableDetailPage() {
     related: [],
   };
   const { probs, loading } = useConditional(safeMarket as any, evidence);
+  // True while a conditional query is in flight OR the target's marginal
+  // probabilities haven't loaded yet (ensureVariables on mount) — drives the
+  // fade/spinner on the probability displays.
+  const probsLoading = loading || !market.probsLoaded;
 
   // History (ProbabilityUpdated notices) for the chart + recent activity.
   const [history, setHistory] = useState<ProbPoint[]>([]);
@@ -138,7 +145,27 @@ export default function VariableDetailPage() {
     ensureVariables([alias, ...(market?.related ?? [])], { force: true });
   }, [fetchHistory, ensureVariables, alias, market]);
 
-  if (!market) {
+  // Manual reload of the displayed probabilities, volume & activity
+  // (authoritative re-read), the history chart, and the header balance.
+  // Useful after a report, while the backend catches up.
+  const [refreshing, setRefreshing] = useState(false);
+  const handleRefresh = useCallback(async () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    try {
+      await Promise.all([
+        ensureVariables([alias, ...(market?.related ?? [])], { force: true }),
+        fetchHistory(),
+        refreshUserInfo(),
+      ]);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [refreshing, ensureVariables, fetchHistory, refreshUserInfo, alias, market]);
+
+  // Once the graph has loaded, an alias that isn't among the unresolved
+  // variables is genuinely unavailable (resolved or unknown).
+  if (aliases.length > 0 && !aliases.includes(alias)) {
     return (
       <div className="max-w-[700px] mx-auto my-20 px-7 text-center">
         <div className="text-xl font-semibold">Market not found</div>
@@ -168,12 +195,23 @@ export default function VariableDetailPage() {
     <div className="px-4 md:px-7 pt-6 pb-14 max-w-[1500px] mx-auto grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_380px] gap-7 items-start animate-in">
       <div className="min-w-0 flex flex-col gap-[18px]">
         {/* Breadcrumb */}
-        <div className="text-[13px] text-ink3">
-          <Link href="/" className="text-ink3 no-underline">
-            Markets
-          </Link>
-          <span className="mx-1.5">›</span>
-          <span>{market.category}</span>
+        <div className="flex items-center justify-between gap-3">
+          <div className="text-[13px] text-ink3">
+            <Link href="/" className="text-ink3 no-underline">
+              Markets
+            </Link>
+            <span className="mx-1.5">›</span>
+            <span>{market.category}</span>
+          </div>
+          <button
+            onClick={handleRefresh}
+            disabled={refreshing || !appAddress}
+            title="Reload probabilities, volume & activity"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-line text-[12px] font-medium text-ink2 hover:bg-line2 disabled:opacity-50 transition-colors"
+          >
+            <RefreshCw size={13} className={refreshing ? "animate-spin" : ""} />
+            Refresh
+          </button>
         </div>
 
         {/* Hero */}
@@ -202,6 +240,7 @@ export default function VariableDetailPage() {
               value={probs[0] ?? 0}
               marginal={marginal[0] ?? 0}
               isConditional={isConditional}
+              loading={probsLoading}
               evidence={evidence}
               relatedMarkets={relatedMarkets}
               stateName={
@@ -257,7 +296,9 @@ export default function VariableDetailPage() {
                     <div className="text-[11px] font-medium opacity-80">
                       {s.name}
                     </div>
-                    <div className="mt-1 font-mono text-[26px] font-semibold tracking-tight">
+                    <div
+                      className={`mt-1 font-mono text-[26px] font-semibold tracking-tight ${probsLoading ? "loading-value" : ""}`}
+                    >
                       {(p * 100).toFixed(0)}
                       <span className="text-sm opacity-60">%</span>
                     </div>
@@ -470,7 +511,7 @@ export default function VariableDetailPage() {
         baselineProbs={probs}
         evidence={evidence}
         relatedMarkets={allMarkets}
-        conditionalLoading={loading}
+        conditionalLoading={probsLoading}
         onReported={handleReported}
       />
     </div>
@@ -484,6 +525,7 @@ function HeroNumber({
   evidence,
   relatedMarkets,
   stateName,
+  loading,
 }: {
   value: number;
   marginal: number;
@@ -491,6 +533,7 @@ function HeroNumber({
   evidence: Selection[];
   relatedMarkets: any[];
   stateName: string;
+  loading?: boolean;
 }) {
   const v = useAnimatedNumber(value);
   const delta = value - marginal;
@@ -499,7 +542,7 @@ function HeroNumber({
       <div
         className={`font-mono text-[56px] font-semibold tracking-tighter leading-none transition-colors ${
           isConditional ? "text-accent-deep" : "text-ink"
-        }`}
+        } ${loading ? "loading-value" : ""}`}
       >
         {Math.round(v * 100)}
         <span className="text-[28px] text-accent">%</span>

@@ -12,6 +12,8 @@ import {
 
 export interface MarketState {
   name: string;
+  // 0 until the variable's probabilities have been loaded; gate display on
+  // `Market.probsLoaded` rather than treating 0 as a real probability.
   prob: number;
 }
 
@@ -23,6 +25,9 @@ export interface Market {
   description: string;
   tags: string[];
   states: MarketState[];
+  // True once real probabilities are loaded; false for a placeholder built
+  // from variable info alone (state names known, probabilities not yet).
+  probsLoaded: boolean;
   volume: number; // ETH
   volume_ss: number; // ETH
   ops: number;
@@ -36,40 +41,60 @@ export interface Market {
 
 const WEI = 1e18;
 
+// Assemble a Market from whatever is currently known about an alias: the
+// info JSON (state names, category, …) is enough to render a placeholder
+// card; the optional summary adds probabilities/volume once loaded.
 export function buildMarket(
-  v: VariableSummary,
+  alias: string,
+  summary: VariableSummary | null | undefined,
   info: VariableInfo | null | undefined,
   nodes: string[][],
   bEth: number | undefined,
 ): Market {
-  const states: MarketState[] = (v.states_probs || []).map((p, i) => ({
-    name: getStateName(info, i),
-    prob: p,
-  }));
+  const probs = summary?.states_probs;
+  const probsLoaded = Array.isArray(probs) && probs.length > 0;
+  let states: MarketState[];
+  if (probsLoaded) {
+    states = probs!.map((p, i) => ({ name: getStateName(info, i), prob: p }));
+  } else {
+    // Placeholder states from info (or n_states) with no probabilities yet.
+    const count = info?.states?.length ?? summary?.n_states ?? 0;
+    states = Array.from({ length: count }, (_, i) => ({
+      name: getStateName(info, i),
+      prob: 0,
+    }));
+  }
   return {
-    alias: v.alias,
-    name: getVarName(info, v.alias),
-    short: info?.short || getVarName(info, v.alias),
+    alias,
+    name: getVarName(info, alias),
+    short: info?.short || getVarName(info, alias),
     category: info?.category || "Market",
     description: info?.description || "",
     tags: info?.tags ?? [],
     states,
-    volume: (v.volume || 0) / WEI,
-    volume_ss: (v.volume_ss || 0) / WEI,
-    ops: v.n_operations || 0,
+    probsLoaded,
+    volume: (summary?.volume || 0) / WEI,
+    volume_ss: (summary?.volume_ss || 0) / WEI,
+    ops: summary?.n_operations || 0,
     b: bEth ?? 0,
-    related: getRelatedVariables(v.alias, nodes),
+    related: getRelatedVariables(alias, nodes),
     closes: info?.closes,
   };
 }
 
-export function buildMarkets(
-  variables: VariableSummary[],
+// Build one Market per alias, pulling each alias's (possibly absent) summary
+// from the shared market-data map. Used by every screen that needs the full
+// variable universe (names/states/cliques) without forcing a probability load.
+export function buildMarketsFromAliases(
+  aliases: string[],
+  marketData: Record<string, VariableSummary>,
   infoMap: Record<string, VariableInfo | null>,
   nodes: string[][],
   bEth: number | undefined,
 ): Market[] {
-  return variables.map((v) => buildMarket(v, infoMap[v.alias], nodes, bEth));
+  return aliases.map((a) =>
+    buildMarket(a, marketData[a], infoMap[a], nodes, bEth),
+  );
 }
 
 // Markets that share a junction-tree clique with EVERY alias in `required`,

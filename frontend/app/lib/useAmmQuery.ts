@@ -93,6 +93,10 @@ export function useConditional(
   );
   const [loading, setLoading] = useState(false);
   const evKey = JSON.stringify(evidence);
+  // Re-run when the target's marginal probabilities change too — they arrive
+  // asynchronously (ensureVariables), so the no-evidence branch must refresh
+  // once they load instead of holding the initial all-zero placeholder.
+  const baseKey = JSON.stringify(market.states.map((s) => s.prob));
 
   useEffect(() => {
     if (!evidence || evidence.length === 0) {
@@ -126,7 +130,7 @@ export function useConditional(
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [market.alias, evKey, appAddress]);
+  }, [market.alias, evKey, appAddress, baseKey]);
 
   return { probs, loading };
 }
@@ -193,6 +197,17 @@ export function useJoint(
   }, [tKey, evKey, appAddress]);
 
   return state;
+}
+
+// Debounce a fast-changing value (e.g. a typed report value) so dependent
+// backend queries only fire after the user pauses for `delay` ms.
+export function useDebounced<T>(value: T, delay = 1500): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const id = setTimeout(() => setDebounced(value), delay);
+    return () => clearTimeout(id);
+  }, [value, delay]);
+  return debounced;
 }
 
 // Tween a number between updates (easeOutCubic). Ported from the template.

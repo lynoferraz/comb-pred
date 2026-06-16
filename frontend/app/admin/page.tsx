@@ -40,7 +40,8 @@ export default function AdminPage() {
     appAddress,
     walletAddress,
     walletClient,
-    variables,
+    aliases,
+    marketData,
     infoMap,
     graphNodes,
     graphEdges,
@@ -206,9 +207,9 @@ export default function AdminPage() {
     );
   }
 
-  const unresolvedVars = variables.filter(
-    (v) => v.states_probs.length > 0 && !v.states_probs.some((p) => p === 1),
-  );
+  // Resolved variables are removed from the junction tree, so the graph's
+  // unresolved alias list is exactly the set that can still be resolved.
+  const unresolvedVars = aliases;
 
   return (
     <div className="px-4 md:px-7 pt-10 pb-14 max-w-[960px] mx-auto space-y-6 animate-in">
@@ -351,9 +352,9 @@ export default function AdminPage() {
               className={inputClass}
             >
               <option value="">Select...</option>
-              {unresolvedVars.map((v) => (
-                <option key={v.alias} value={v.alias}>
-                  {getVarName(infoMap[v.alias], v.alias)}
+              {unresolvedVars.map((a) => (
+                <option key={a} value={a}>
+                  {getVarName(infoMap[a], a)}
                 </option>
               ))}
             </select>
@@ -363,8 +364,10 @@ export default function AdminPage() {
               <label className={labelClass}>Final State</label>
               <select value={resolveState} onChange={(e) => setResolveState(e.target.value)} className={inputClass}>
                 {(() => {
-                  const v = variables.find((v) => v.alias === resolveAlias);
-                  const n = v ? v.states_probs.length : 2;
+                  const n =
+                    infoMap[resolveAlias]?.states?.length ??
+                    marketData[resolveAlias]?.n_states ??
+                    2;
                   return Array.from({ length: n }, (_, i) => (
                     <option key={i} value={i}>
                       {getStateName(infoMap[resolveAlias], i)}

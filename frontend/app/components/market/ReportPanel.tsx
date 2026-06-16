@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { toHex } from "viem";
 import { useApp } from "../../lib/context";
@@ -129,9 +129,12 @@ export default function ReportPanel({
   // ── Live simulation (client-side fallback for the preview) ────────────────
   const amountNum = Math.max(0, parseFloat(amount) || 0);
   const beginnerRawTarget = pFromSpend(b, pOld, amountNum, otherProbs);
-  // Clamp beginner target to bounds so the simulation never displays an
-  // unreachable push.
-  const targetP = Math.min(hiBound, Math.max(loBound, beginnerRawTarget));
+  // Track the amount across its whole range (clamped only to a valid
+  // probability). The edit bounds are advisory: exceeding them surfaces the
+  // "capped" hint below and is blocked at submit — we no longer clamp the
+  // target to hiBound here, which previously froze it once the spend pushed
+  // past the max bound.
+  const targetP = Math.min(0.995, Math.max(0.005, beginnerRawTarget));
   const reportValue = mode === "beginner" ? targetP : pNew;
 
   const sim = useMemo(
@@ -139,57 +142,85 @@ export default function ReportPanel({
     [b, pOld, reportValue, otherProbs],
   );
 
-  // ── Authoritative preview (value + user_address): real cost/revenue ───────
+  // ── Gate the backend preview ──────────────────────────────────────────────
+  // The client sim above updates live as the slider/amount move; the
+  // authoritative preview query is keyed on `queryValue`, a debounced copy of
+  // `reportValue`. A plain debounce effect monitors every change to
+  // `reportValue` (which itself tracks `amount`/`pNew` via targetP), so it can
+  // never get "stuck". The slider commits immediately on release for snappier
+  // feedback.
+  const reportValueRef = useRef(reportValue);
+  reportValueRef.current = reportValue;
+  const [queryValue, setQueryValue] = useState(reportValue);
+
   useEffect(() => {
-    if (!walletAddress || !appAddress || reportValue <= 0 || reportValue >= 1) {
+    const id = setTimeout(() => setQueryValue(reportValue), 1200);
+    return () => clearTimeout(id);
+  }, [reportValue]);
+
+  const commitNow = useCallback(() => setQueryValue(reportValueRef.current), []);
+
+  // ── Authoritative preview (value + user_address): real cost/expected ──────
+  useEffect(() => {
+    if (!walletAddress || !appAddress || queryValue <= 0 || queryValue >= 1) {
       setPreview(null);
       return;
     }
     let cancelled = false;
-    const id = setTimeout(() => {
-      setPreviewLoading(true);
-      ammQuery(config, {
-        varAliases: [market.alias],
-        varStates: [currentStateIdx],
-        evidenceAliases: evidence.map((e) => e.alias),
-        evidenceStates: evidence.map((e) => e.stateIdx),
-        value: reportValue,
-        userAddress: walletAddress,
+    setPreviewLoading(true);
+    ammQuery(config, {
+      varAliases: [market.alias],
+      varStates: [currentStateIdx],
+      evidenceAliases: evidence.map((e) => e.alias),
+      evidenceStates: evidence.map((e) => e.stateIdx),
+      value: queryValue,
+      userAddress: walletAddress,
+    })
+      .then((res) => {
+        if (!cancelled) setPreview(res);
       })
-        .then((res) => {
-          if (!cancelled) setPreview(res);
-        })
-        .catch(() => {
-          if (!cancelled) setPreview(null);
-        })
-        .finally(() => {
-          if (!cancelled) setPreviewLoading(false);
-        });
-    }, 400);
+      .catch(() => {
+        if (!cancelled) setPreview(null);
+      })
+      .finally(() => {
+        if (!cancelled) setPreviewLoading(false);
+      });
     return () => {
       cancelled = true;
-      clearTimeout(id);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    market.alias,
-    currentStateIdx,
-    reportValue,
-    walletAddress,
-    appAddress,
-    evKey,
-  ]);
+  }, [market.alias, currentStateIdx, queryValue, walletAddress, appAddress, evKey]);
 
-  // Prefer backend numbers when present; fall back to client sim otherwise.
+  // The preview is debounced, so for ~1.2s after a change it still describes
+  // the OLD report value. Only trust it while it matches the current
+  // reportValue; otherwise fall back to the live client sim so the displayed
+  // cost tracks the slider/amount instantly instead of looking frozen.
+  const previewFresh =
+    preview != null && Math.abs(queryValue - reportValue) < 1e-9;
   const costEth =
-    preview?.user_cost_delta !== undefined
+    previewFresh && preview?.user_cost_delta !== undefined
       ? Number(preview.user_cost_delta) / 1e18
       : sim.costDelta;
   const revenueEth =
-    preview?.user_revenue_delta !== undefined
+    previewFresh && preview?.user_revenue_delta !== undefined
       ? Number(preview.user_revenue_delta) / 1e18
-      : sim.revenueDelta;
+      : undefined;
   const shares = sim.shares;
+  // Expected funds if this outcome wins: the user_expected_value row matching
+  // the reported state, plus the revenue this report would add
+  // (user_revenue_delta). Δ is vs the user's current overall expected balance,
+  // mirroring the Positions table.
+  const expectedRow = preview?.user_expected_value?.find(
+    (r) => Number(r[market.alias]) === currentStateIdx,
+  );
+  const expectedFundsEth =
+    expectedRow !== undefined && revenueEth !== undefined
+      ? Number(expectedRow.value) / 1e18 + revenueEth
+      : undefined;
+  const expectedDelta =
+    expectedFundsEth !== undefined && userExpected !== undefined
+      ? expectedFundsEth - userExpected
+      : undefined;
 
   // ── Submit ────────────────────────────────────────────────────────────────
   const handleSubmit = async () => {
@@ -229,9 +260,14 @@ export default function ReportPanel({
         applicationAddress: appAddress,
         client: walletClient,
       });
-      updateToast(toastId, "success", "Forecast submitted");
+      updateToast(
+        toastId,
+        "success",
+        "Forecast submitted",
+        "It can take some time for the backend to process the input.",
+      );
       setSubmitted(true);
-      setTimeout(() => setSubmitted(false), 4000);
+      setTimeout(() => setSubmitted(false), 8000);
       await refreshUserInfo();
       onReported();
     } catch (err: any) {
@@ -253,10 +289,15 @@ export default function ReportPanel({
     <div
       className={`bg-surface rounded-[20px] p-[22px] flex flex-col gap-3.5 sticky top-20 transition-colors ${
         isConditional ? "border border-accent" : "border border-line"
-      } ${conditionalLoading ? "opacity-65" : ""}`}
+      }`}
     >
       <div className="flex justify-between items-center">
-        <div className="text-base font-semibold">Place a forecast</div>
+        <div className="flex items-center gap-2">
+          <div className="text-base font-semibold">Place a forecast</div>
+          {(conditionalLoading || previewLoading) && (
+            <span className="cim-spinner" title="Updating forecast preview…" />
+          )}
+        </div>
         <div className="flex bg-line2 p-0.5 rounded-full text-[11px]">
           {(["beginner", "pro"] as const).map((m) => (
             <button
@@ -304,7 +345,9 @@ export default function ReportPanel({
                   }`}
                 >
                   <span>{s.name}</span>
-                  <span className="font-mono font-semibold">
+                  <span
+                    className={`font-mono font-semibold ${conditionalLoading ? "loading-value" : ""}`}
+                  >
                     {fmt.pct(baselineProbs[i] ?? 0)}
                   </span>
                 </button>
@@ -327,7 +370,9 @@ export default function ReportPanel({
               {market.states[0].name}
               {isConditional && " (cond.)"}
             </span>
-            <span className="text-[22px] font-mono font-semibold">
+            <span
+              className={`text-[22px] font-mono font-semibold ${conditionalLoading ? "loading-value" : ""}`}
+            >
               {fmt.pct(baselineProbs[0] ?? 0)}
             </span>
           </button>
@@ -341,7 +386,9 @@ export default function ReportPanel({
               {market.states[1].name}
               {isConditional && " (cond.)"}
             </span>
-            <span className="text-[22px] font-mono font-semibold">
+            <span
+              className={`text-[22px] font-mono font-semibold ${conditionalLoading ? "loading-value" : ""}`}
+            >
               {fmt.pct(baselineProbs[1] ?? 0)}
             </span>
           </button>
@@ -405,9 +452,10 @@ export default function ReportPanel({
                 </button>
               ))}
             </div>
-            {bounds && beginnerRawTarget > hiBound && (
-              <div className="mt-2 text-[11px] text-ink3 font-mono">
-                Capped at edit-bounds upper limit {hiBound.toFixed(4)}.
+            {bounds && targetP > hiBound && (
+              <div className="mt-2 text-[11px] text-no font-mono">
+                Beyond your reachable max P({stateName}) = {hiBound.toFixed(4)} —
+                reduce the amount or it'll be rejected at submit.
               </div>
             )}
           </div>
@@ -425,7 +473,7 @@ export default function ReportPanel({
                     : "text-accent-deep"
                 }`}
               >
-                If{" "}
+                Expected funds if{" "}
                 {isBinary ? (side === "yes" ? "Yes" : "No") : `"${stateName}"`}{" "}
                 wins
                 {isConditional && (
@@ -437,23 +485,43 @@ export default function ReportPanel({
                   side === "no" && isBinary
                     ? "text-no-deep"
                     : "text-accent-deep"
-                }`}
+                } ${previewLoading ? "loading-value" : ""}`}
               >
-                +{fmt.eth(Math.max(0, revenueEth), 4)}{" "}
+                {expectedFundsEth !== undefined
+                  ? fmt.eth(expectedFundsEth, 4)
+                  : "—"}{" "}
                 <span className="text-[13px]">ETH</span>
               </span>
             </div>
             <div className="h-px bg-black/10" />
             <div className="flex justify-between items-baseline text-xs">
+              <span className="text-ink2">Δ vs expected</span>
+              <span
+                className={`font-mono font-semibold whitespace-nowrap ${
+                  (expectedDelta ?? 0) >= 0 ? "text-accent-deep" : "text-no-deep"
+                } ${previewLoading ? "loading-value" : ""}`}
+              >
+                {expectedDelta !== undefined
+                  ? fmt.signed(expectedDelta, 5) + " ETH"
+                  : "—"}
+              </span>
+            </div>
+            <div className="flex justify-between items-baseline text-xs">
               <span className="text-ink2">You'd get</span>
-              <span className="font-mono text-ink font-semibold whitespace-nowrap">
+              <span
+                className={`font-mono text-ink font-semibold whitespace-nowrap ${previewLoading ? "loading-value" : ""}`}
+              >
                 {fmt.eth(shares * 1000000, 1)}u shares
               </span>
             </div>
             <div className="flex justify-between items-baseline text-xs">
-              <span className="text-ink2">Cost now</span>
-              <span className="font-mono text-ink font-semibold whitespace-nowrap">
-                {fmt.eth(Math.abs(costEth), 5)} ETH
+              <span className="text-ink2">
+                {costEth > 0 ? "Revenue now" : "Cost now"}
+              </span>
+              <span
+                className={`font-mono font-semibold whitespace-nowrap ${costEth > 0 ? "text-accent" : "text-ink"} ${previewLoading ? "loading-value" : ""}`}
+              >
+                {(costEth > 0 ? "+" : "") + fmt.eth(Math.abs(costEth), 5)} ETH
               </span>
             </div>
             <div className="flex justify-between items-baseline text-xs">
@@ -520,6 +588,9 @@ export default function ReportPanel({
               step={0.0001}
               value={pNew}
               onChange={(e) => setPNew(parseFloat(e.target.value))}
+              onPointerUp={commitNow}
+              onTouchEnd={commitNow}
+              onKeyUp={commitNow}
               className="w-full mt-3 accent-[var(--color-accent)]"
             />
             <div className="flex justify-between text-[10px] font-mono text-ink3 mt-0.5">
@@ -541,19 +612,30 @@ export default function ReportPanel({
                 fmt.eth(shares * 1000000, 1) + "u",
                 "text-ink",
               ],
-              ["Cost now", fmt.eth(Math.abs(costEth), 5) + " ETH", "text-ink"],
               [
-                "Revenue if right",
-                (revenueEth >= 0 ? "+" : "−") +
-                  fmt.eth(Math.abs(revenueEth), 5) +
-                  " ETH",
-                revenueEth >= 0 ? "text-accent" : "text-no",
+                costEth > 0 ? "Revenue now" : "Cost now",
+                (costEth > 0 ? "+" : "") + fmt.eth(Math.abs(costEth), 5) + " ETH",
+                costEth > 0 ? "text-accent" : "text-ink",
+              ],
+              [
+                "Expected if right",
+                expectedFundsEth !== undefined
+                  ? fmt.eth(expectedFundsEth, 5) + " ETH"
+                  : "—",
+                "text-ink",
+              ],
+              [
+                "Δ vs expected",
+                expectedDelta !== undefined
+                  ? fmt.signed(expectedDelta, 5) + " ETH"
+                  : "—",
+                (expectedDelta ?? 0) >= 0 ? "text-accent" : "text-no",
               ],
             ].map(([k, v, color]) => (
               <div key={k} className="flex justify-between text-xs gap-2">
                 <span className="text-ink2">{k}</span>
                 <span
-                  className={`font-mono font-semibold whitespace-nowrap ${color}`}
+                  className={`font-mono font-semibold whitespace-nowrap ${color} ${previewLoading ? "loading-value" : ""}`}
                 >
                   {v}
                 </span>
@@ -571,7 +653,9 @@ export default function ReportPanel({
             <div className="p-3.5 border border-line rounded-[14px] flex flex-col gap-2.5">
               <div className="flex justify-between text-xs gap-2">
                 <span className="text-ink2">Auto-revert if cost exceeds</span>
-                <span className="font-mono font-semibold text-ink whitespace-nowrap">
+                <span
+                  className={`font-mono font-semibold text-ink whitespace-nowrap ${previewLoading ? "loading-value" : ""}`}
+                >
                   {fmt.eth(Math.abs(costEth) * (1 + marginPct / 100), 5)} ETH
                 </span>
               </div>
@@ -626,6 +710,11 @@ export default function ReportPanel({
             <div className="text-[11px] opacity-80 font-mono mt-0.5">
               reported P({stateName}) = {reportValue.toFixed(4)}
               {isConditional && ` · conditional on ${evidence.length}`}
+            </div>
+            <div className="text-[11px] opacity-80 mt-1.5 leading-snug">
+              It can take some time for the backend to process the input —
+              probabilities will update once it's confirmed. Use refresh to
+              reload them.
             </div>
           </div>
         </div>

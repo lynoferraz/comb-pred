@@ -96,6 +96,21 @@
   margin-right: 4px;
 }
 
+/* Slow blink for stale values being refreshed (probabilities, joints, …).
+   Fades the old value and pulses gently so it's clearly "loading". */
+@keyframes cim-value-pulse {
+  0%,
+  100% {
+    opacity: 0.32;
+  }
+  50% {
+    opacity: 0.6;
+  }
+}
+.loading-value {
+  animation: cim-value-pulse 1.4s ease-in-out infinite;
+}
+
 /* Toast enter/exit */
 @keyframes cim-toast-in {
   from {

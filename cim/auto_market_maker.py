@@ -913,7 +913,7 @@ class ABAmm():
                 else:
                     kr = {k: v for k, v in s if k in report['variables']}
                     po = prob_fn.get_value(**kr)
-                    s_min_target = ((1-cur_p) / value) * ((1-cur_p) / po)
+                    s_min_target = (1-cur_p) / value
                     if min_other is None or s_min_target < min_other:
                         min_other = s_min_target
 
@@ -983,20 +983,14 @@ class ABAmm():
                 value = wblock.get_value(**s_dict)
                 if all(s_dict.get(k) == v for k, v in report.get('variables',{}).items()):
                     n_value = value * x_target / p_target
-                    if min_value_before is None or n_value < min_value_before:
-                        min_value_before = value
-                    if min_value is None or value < min_value:
-                        min_value = n_value
                     revenue_value_before = value
                     revenue_value = n_value
                 else:
                     kr = {k: v for k, v in s if k in report['variables']}
-                    po = prob_fn.get_value(**kr)
-                    n_value = value * (1 - x_target) / (1 - p_target) * ((po) / (1 - p_target))
-                    if min_value_before is None or n_value < min_value_before:
-                        min_value_before = value
-                    if min_value is None or n_value < min_value:
-                        min_value = n_value
+                    n_value = value * (1 - x_target) / (1 - p_target)
+                if min_value is None or n_value < min_value:
+                    min_value = n_value
+                    min_value_before = value
 
         revenue = revert_fund(revenue_value/revenue_value_before, self._b)
         if not math.isclose(min_value,1) and min_value < 1:

@@ -38,8 +38,9 @@ import {
   type DecodedIndexerOutput,
 } from "../cartesapp/lib";
 
-import * as indexerIfaces from "../indexer/ifaces.d";
+import * as indexerIfaces from "../indexer/ifaces.d"
 import * as ifaces from "./ifaces.d";
+
 
 /**
  * Configs
@@ -58,18 +59,43 @@ const MAX_SPLITTABLE_OUTPUT_SIZE = 4194247;
  * Mutations/Advances
  */
 
+export async function withdrawEther(
+    inputData: ifaces.WithdrawEtherPayload,
+    options:MutationOptions
+): Promise<InputAdded[] | AdvanceResult[] | unknown[]> {
+  const data: WithdrawEtherPayload = new WithdrawEtherPayload(inputData);
+  if (options?.decode) { options.sync = true; }
+  const result = await genericAdvanceInput<ifaces.WithdrawEtherPayload>(
+    options,
+    '0x8cf70f0b',
+    data
+  );
+  if (options?.sync) {
+    const advanceResults = await listAdvanceResults(
+      {
+        applicationAddress: options.applicationAddress,
+        cartesiNodeUrl: options.cartesiNodeUrl,
+      },
+      result,
+    );
+    if (options?.decode) {
+      return decodeAdvance(advanceResults, decodeToModel, options);
+    }
+    return advanceResults;
+  }
+  return result;
+}
+
 export async function initializeAmm(
-  inputData: ifaces.InitializePayload,
-  options: MutationOptions,
+    inputData: ifaces.InitializePayload,
+    options:MutationOptions
 ): Promise<InputAdded[] | AdvanceResult[] | unknown[]> {
   const data: InitializePayload = new InitializePayload(inputData);
-  if (options?.decode) {
-    options.sync = true;
-  }
+  if (options?.decode) { options.sync = true; }
   const result = await genericAdvanceInput<ifaces.InitializePayload>(
     options,
-    "0x5c2bf38a",
-    data,
+    '0x5c2bf38a',
+    data
   );
   if (options?.sync) {
     const advanceResults = await listAdvanceResults(
@@ -88,17 +114,15 @@ export async function initializeAmm(
 }
 
 export async function addVariable(
-  inputData: ifaces.AddVariablePayload,
-  options: MutationOptions,
+    inputData: ifaces.AddVariablePayload,
+    options:MutationOptions
 ): Promise<InputAdded[] | AdvanceResult[] | unknown[]> {
   const data: AddVariablePayload = new AddVariablePayload(inputData);
-  if (options?.decode) {
-    options.sync = true;
-  }
+  if (options?.decode) { options.sync = true; }
   const result = await genericAdvanceInput<ifaces.AddVariablePayload>(
     options,
-    "0x132da0d4",
-    data,
+    '0x132da0d4',
+    data
   );
   if (options?.sync) {
     const advanceResults = await listAdvanceResults(
@@ -117,17 +141,15 @@ export async function addVariable(
 }
 
 export async function resolveVariable(
-  inputData: ifaces.ResolveVariablePayload,
-  options: MutationOptions,
+    inputData: ifaces.ResolveVariablePayload,
+    options:MutationOptions
 ): Promise<InputAdded[] | AdvanceResult[] | unknown[]> {
   const data: ResolveVariablePayload = new ResolveVariablePayload(inputData);
-  if (options?.decode) {
-    options.sync = true;
-  }
+  if (options?.decode) { options.sync = true; }
   const result = await genericAdvanceInput<ifaces.ResolveVariablePayload>(
     options,
-    "0x33e54682",
-    data,
+    '0x33e54682',
+    data
   );
   if (options?.sync) {
     const advanceResults = await listAdvanceResults(
@@ -146,17 +168,15 @@ export async function resolveVariable(
 }
 
 export async function editVariable(
-  inputData: ifaces.EditVariablesPayload,
-  options: MutationOptions,
+    inputData: ifaces.EditVariablesPayload,
+    options:MutationOptions
 ): Promise<InputAdded[] | AdvanceResult[] | unknown[]> {
   const data: EditVariablesPayload = new EditVariablesPayload(inputData);
-  if (options?.decode) {
-    options.sync = true;
-  }
+  if (options?.decode) { options.sync = true; }
   const result = await genericAdvanceInput<ifaces.EditVariablesPayload>(
     options,
-    "0xfc3b5756",
-    data,
+    '0xfc3b5756',
+    data
   );
   if (options?.sync) {
     const advanceResults = await listAdvanceResults(
@@ -175,17 +195,15 @@ export async function editVariable(
 }
 
 export async function setOperatorAddress(
-  inputData: ifaces.SetOperatorPayload,
-  options: MutationOptions,
+    inputData: ifaces.SetOperatorPayload,
+    options:MutationOptions
 ): Promise<InputAdded[] | AdvanceResult[] | unknown[]> {
   const data: SetOperatorPayload = new SetOperatorPayload(inputData);
-  if (options?.decode) {
-    options.sync = true;
-  }
+  if (options?.decode) { options.sync = true; }
   const result = await genericAdvanceInput<ifaces.SetOperatorPayload>(
     options,
-    "0x1c1ed4f6",
-    data,
+    '0x1c1ed4f6',
+    data
   );
   if (options?.sync) {
     const advanceResults = await listAdvanceResults(
@@ -203,140 +221,167 @@ export async function setOperatorAddress(
   return result;
 }
 
+
 /*
  * Queries/Inspects
  */
 
 export async function variable(
-  inputData: ifaces.VariablesPayload,
-  options?: QueryOptions,
-): Promise<InspectReport | any> {
-  const selectorInfo = "cim_variable";
+    inputData: ifaces.VariablesPayload,
+    options?:QueryOptions
+):Promise<InspectReport|any> {
+  const selectorInfo = 'cim_variable';
   const data: VariablesPayload = new VariablesPayload(inputData);
-  const output: InspectReport = await genericInspect<ifaces.VariablesPayload>(
-    data,
-    selectorInfo,
-    options,
-  );
+  const output: InspectReport =
+    await genericInspect<ifaces.VariablesPayload>(
+      data,
+      selectorInfo,
+      options
+    );
   if (options?.decode) {
-    return decodeToModel(output, options.decodeModel);
+    return decodeToModel(output,options.decodeModel);
+  }
+  return output;
+}
+
+export async function listVariables(
+    inputData: ifaces.ListVariablesPayload,
+    options?:QueryOptions
+):Promise<InspectReport|any> {
+  const selectorInfo = 'cim_listVariables';
+  const data: ListVariablesPayload = new ListVariablesPayload(inputData);
+  const output: InspectReport =
+    await genericInspect<ifaces.ListVariablesPayload>(
+      data,
+      selectorInfo,
+      options
+    );
+  if (options?.decode) {
+    return decodeToModel(output,options.decodeModel);
   }
   return output;
 }
 
 export async function graph(
-  inputData: ifaces.EmptyClass,
-  options?: QueryOptions,
-): Promise<InspectReport | any> {
-  const selectorInfo = "cim_graph";
+    inputData: ifaces.EmptyClass,
+    options?:QueryOptions
+):Promise<InspectReport|any> {
+  const selectorInfo = 'cim_graph';
   const data: EmptyClass = new EmptyClass(inputData);
-  const output: InspectReport = await genericInspect<ifaces.EmptyClass>(
-    data,
-    selectorInfo,
-    options,
-  );
+  const output: InspectReport =
+    await genericInspect<ifaces.EmptyClass>(
+      data,
+      selectorInfo,
+      options
+    );
   if (options?.decode) {
-    return decodeToModel(output, options.decodeModel);
+    return decodeToModel(output,options.decodeModel);
   }
   return output;
 }
 
 export async function queryAmm(
-  inputData: ifaces.QueryVariablesPayload,
-  options?: QueryOptions,
-): Promise<InspectReport | any> {
-  const selectorInfo = "cim_queryAmm";
+    inputData: ifaces.QueryVariablesPayload,
+    options?:QueryOptions
+):Promise<InspectReport|any> {
+  const selectorInfo = 'cim_queryAmm';
   const data: QueryVariablesPayload = new QueryVariablesPayload(inputData);
   const output: InspectReport =
     await genericInspect<ifaces.QueryVariablesPayload>(
       data,
       selectorInfo,
-      options,
+      options
     );
   if (options?.decode) {
-    return decodeToModel(output, options.decodeModel);
+    return decodeToModel(output,options.decodeModel);
   }
   return output;
 }
 
 export async function userInfo(
-  inputData: ifaces.UserInfoPayload,
-  options?: QueryOptions,
-): Promise<InspectReport | any> {
-  const selectorInfo = "cim_userInfo";
+    inputData: ifaces.UserInfoPayload,
+    options?:QueryOptions
+):Promise<InspectReport|any> {
+  const selectorInfo = 'cim_userInfo';
   const data: UserInfoPayload = new UserInfoPayload(inputData);
-  const output: InspectReport = await genericInspect<ifaces.UserInfoPayload>(
-    data,
-    selectorInfo,
-    options,
-  );
+  const output: InspectReport =
+    await genericInspect<ifaces.UserInfoPayload>(
+      data,
+      selectorInfo,
+      options
+    );
   if (options?.decode) {
-    return decodeToModel(output, options.decodeModel);
+    return decodeToModel(output,options.decodeModel);
   }
   return output;
 }
 
 export async function operatorAddress(
-  inputData: ifaces.EmptyClass,
-  options?: QueryOptions,
-): Promise<InspectReport | any> {
-  const selectorInfo = "cim_operatorAddress";
+    inputData: ifaces.EmptyClass,
+    options?:QueryOptions
+):Promise<InspectReport|any> {
+  const selectorInfo = 'cim_operatorAddress';
   const data: EmptyClass = new EmptyClass(inputData);
-  const output: InspectReport = await genericInspect<ifaces.EmptyClass>(
-    data,
-    selectorInfo,
-    options,
-  );
+  const output: InspectReport =
+    await genericInspect<ifaces.EmptyClass>(
+      data,
+      selectorInfo,
+      options
+    );
   if (options?.decode) {
-    return decodeToModel(output, options.decodeModel);
+    return decodeToModel(output,options.decodeModel);
   }
   return output;
 }
 
 export async function adminAddress(
-  inputData: ifaces.EmptyClass,
-  options?: QueryOptions,
-): Promise<InspectReport | any> {
-  const selectorInfo = "cim_adminAddress";
+    inputData: ifaces.EmptyClass,
+    options?:QueryOptions
+):Promise<InspectReport|any> {
+  const selectorInfo = 'cim_adminAddress';
   const data: EmptyClass = new EmptyClass(inputData);
-  const output: InspectReport = await genericInspect<ifaces.EmptyClass>(
-    data,
-    selectorInfo,
-    options,
-  );
+  const output: InspectReport =
+    await genericInspect<ifaces.EmptyClass>(
+      data,
+      selectorInfo,
+      options
+    );
   if (options?.decode) {
-    return decodeToModel(output, options.decodeModel);
+    return decodeToModel(output,options.decodeModel);
   }
   return output;
 }
 
 export async function config(
-  inputData: ifaces.EmptyClass,
-  options?: QueryOptions,
-): Promise<InspectReport | any> {
-  const selectorInfo = "cim_config";
+    inputData: ifaces.EmptyClass,
+    options?:QueryOptions
+):Promise<InspectReport|any> {
+  const selectorInfo = 'cim_config';
   const data: EmptyClass = new EmptyClass(inputData);
-  const output: InspectReport = await genericInspect<ifaces.EmptyClass>(
-    data,
-    selectorInfo,
-    options,
-  );
+  const output: InspectReport =
+    await genericInspect<ifaces.EmptyClass>(
+      data,
+      selectorInfo,
+      options
+    );
   if (options?.decode) {
-    return decodeToModel(output, options.decodeModel);
+    return decodeToModel(output,options.decodeModel);
   }
   return output;
 }
+
 
 /*
  * Indexer Query
  */
 
 export async function getOutputs(
-  inputData: indexerIfaces.IndexerPayload,
-  options: InspectOptions,
-): Promise<DecodedIndexerOutput> {
-  return genericGetOutputs(inputData, decodeToModel, options);
+    inputData: indexerIfaces.IndexerPayload,
+    options:InspectOptions
+):Promise<DecodedIndexerOutput> {
+    return genericGetOutputs(inputData,decodeToModel,options);
 }
+
 
 /**
  * Models Decoders/Exporters
@@ -344,15 +389,12 @@ export async function getOutputs(
 
 export function decodeToModel(
   data: CartesiInput | CartesiOutput | CartesiReport | InspectReport,
-  modelName: string | undefined,
+  modelName: string | undefined
 ): any {
   if (modelName == undefined) modelName = "json";
   if (CONVENTIONAL_TYPES.includes(modelName)) {
     if ((data as CartesiOutput).decodedData)
-      return decodeToConventionalTypes(
-        (data as CartesiOutput).decodedData.payload,
-        modelName,
-      );
+      return decodeToConventionalTypes((data as CartesiOutput).decodedData.payload, modelName);
     return decodeToConventionalTypes(data.rawData, modelName);
   }
   const decoder = models[modelName].decoder;
@@ -366,10 +408,31 @@ export function exportToModel(data: any, modelName: string): string {
   return exporter(data);
 }
 
+// Mutation WithdrawEtherPayload
+export class WithdrawEtherPayloadInput extends Input<ifaces.WithdrawEtherPayload> {
+  constructor(data: CartesiInput) {
+    super(models['WithdrawEtherPayload'],data);
+  }
+}
+export function decodeToWithdrawEtherPayloadInput(
+  data: CartesiInput | CartesiOutput | CartesiReport | InspectReport,
+): WithdrawEtherPayloadInput {
+  return new WithdrawEtherPayloadInput(data as CartesiInput);
+}
+export class WithdrawEtherPayload extends IOData<ifaces.WithdrawEtherPayload> {
+  constructor(data: ifaces.WithdrawEtherPayload, validate: boolean = true) {
+    super(models['WithdrawEtherPayload'],data,validate);
+  }
+}
+export function exportToWithdrawEtherPayload(data: ifaces.WithdrawEtherPayload): string {
+  const dataToExport: WithdrawEtherPayload = new WithdrawEtherPayload(data);
+  return dataToExport.export();
+}
+
 // Mutation InitializePayload
 export class InitializePayloadInput extends Input<ifaces.InitializePayload> {
   constructor(data: CartesiInput) {
-    super(models["InitializePayload"], data);
+    super(models['InitializePayload'],data);
   }
 }
 export function decodeToInitializePayloadInput(
@@ -379,12 +442,10 @@ export function decodeToInitializePayloadInput(
 }
 export class InitializePayload extends IOData<ifaces.InitializePayload> {
   constructor(data: ifaces.InitializePayload, validate: boolean = true) {
-    super(models["InitializePayload"], data, validate);
+    super(models['InitializePayload'],data,validate);
   }
 }
-export function exportToInitializePayload(
-  data: ifaces.InitializePayload,
-): string {
+export function exportToInitializePayload(data: ifaces.InitializePayload): string {
   const dataToExport: InitializePayload = new InitializePayload(data);
   return dataToExport.export();
 }
@@ -392,7 +453,7 @@ export function exportToInitializePayload(
 // Mutation AddVariablePayload
 export class AddVariablePayloadInput extends Input<ifaces.AddVariablePayload> {
   constructor(data: CartesiInput) {
-    super(models["AddVariablePayload"], data);
+    super(models['AddVariablePayload'],data);
   }
 }
 export function decodeToAddVariablePayloadInput(
@@ -402,12 +463,10 @@ export function decodeToAddVariablePayloadInput(
 }
 export class AddVariablePayload extends IOData<ifaces.AddVariablePayload> {
   constructor(data: ifaces.AddVariablePayload, validate: boolean = true) {
-    super(models["AddVariablePayload"], data, validate);
+    super(models['AddVariablePayload'],data,validate);
   }
 }
-export function exportToAddVariablePayload(
-  data: ifaces.AddVariablePayload,
-): string {
+export function exportToAddVariablePayload(data: ifaces.AddVariablePayload): string {
   const dataToExport: AddVariablePayload = new AddVariablePayload(data);
   return dataToExport.export();
 }
@@ -415,7 +474,7 @@ export function exportToAddVariablePayload(
 // Mutation ResolveVariablePayload
 export class ResolveVariablePayloadInput extends Input<ifaces.ResolveVariablePayload> {
   constructor(data: CartesiInput) {
-    super(models["ResolveVariablePayload"], data);
+    super(models['ResolveVariablePayload'],data);
   }
 }
 export function decodeToResolveVariablePayloadInput(
@@ -425,12 +484,10 @@ export function decodeToResolveVariablePayloadInput(
 }
 export class ResolveVariablePayload extends IOData<ifaces.ResolveVariablePayload> {
   constructor(data: ifaces.ResolveVariablePayload, validate: boolean = true) {
-    super(models["ResolveVariablePayload"], data, validate);
+    super(models['ResolveVariablePayload'],data,validate);
   }
 }
-export function exportToResolveVariablePayload(
-  data: ifaces.ResolveVariablePayload,
-): string {
+export function exportToResolveVariablePayload(data: ifaces.ResolveVariablePayload): string {
   const dataToExport: ResolveVariablePayload = new ResolveVariablePayload(data);
   return dataToExport.export();
 }
@@ -438,7 +495,7 @@ export function exportToResolveVariablePayload(
 // Mutation EditVariablesPayload
 export class EditVariablesPayloadInput extends Input<ifaces.EditVariablesPayload> {
   constructor(data: CartesiInput) {
-    super(models["EditVariablesPayload"], data);
+    super(models['EditVariablesPayload'],data);
   }
 }
 export function decodeToEditVariablesPayloadInput(
@@ -448,12 +505,10 @@ export function decodeToEditVariablesPayloadInput(
 }
 export class EditVariablesPayload extends IOData<ifaces.EditVariablesPayload> {
   constructor(data: ifaces.EditVariablesPayload, validate: boolean = true) {
-    super(models["EditVariablesPayload"], data, validate);
+    super(models['EditVariablesPayload'],data,validate);
   }
 }
-export function exportToEditVariablesPayload(
-  data: ifaces.EditVariablesPayload,
-): string {
+export function exportToEditVariablesPayload(data: ifaces.EditVariablesPayload): string {
   const dataToExport: EditVariablesPayload = new EditVariablesPayload(data);
   return dataToExport.export();
 }
@@ -461,7 +516,7 @@ export function exportToEditVariablesPayload(
 // Mutation SetOperatorPayload
 export class SetOperatorPayloadInput extends Input<ifaces.SetOperatorPayload> {
   constructor(data: CartesiInput) {
-    super(models["SetOperatorPayload"], data);
+    super(models['SetOperatorPayload'],data);
   }
 }
 export function decodeToSetOperatorPayloadInput(
@@ -471,12 +526,10 @@ export function decodeToSetOperatorPayloadInput(
 }
 export class SetOperatorPayload extends IOData<ifaces.SetOperatorPayload> {
   constructor(data: ifaces.SetOperatorPayload, validate: boolean = true) {
-    super(models["SetOperatorPayload"], data, validate);
+    super(models['SetOperatorPayload'],data,validate);
   }
 }
-export function exportToSetOperatorPayload(
-  data: ifaces.SetOperatorPayload,
-): string {
+export function exportToSetOperatorPayload(data: ifaces.SetOperatorPayload): string {
   const dataToExport: SetOperatorPayload = new SetOperatorPayload(data);
   return dataToExport.export();
 }
@@ -496,13 +549,37 @@ export function exportToSetOperatorPayload(
 
 export class VariablesPayload extends IOData<ifaces.VariablesPayload> {
   constructor(data: ifaces.VariablesPayload, validate: boolean = true) {
-    super(models["VariablesPayload"], data, validate);
+    super(models['VariablesPayload'],data,validate);
   }
 }
 export function exportToVariablesPayload(
-  data: ifaces.VariablesPayload,
+  data: ifaces.VariablesPayload
 ): string {
   const dataToExport: VariablesPayload = new VariablesPayload(data);
+  return dataToExport.export();
+}
+// Query ListVariablesPayload
+
+// export class ListVariablesPayloadInput extends Input<ifaces.ListVariablesPayload> {
+//   constructor(data: CartesiInput) {
+//     super(models['ListVariablesPayload'],data);
+//   }
+// }
+// export function decodeToListVariablesPayloadInput(
+//   data: CartesiInput | CartesiOutput | CartesiReport | InspectReport
+// ): ListVariablesPayloadInput {
+//   return new ListVariablesPayloadInput(data as CartesiInput);
+// }
+
+export class ListVariablesPayload extends IOData<ifaces.ListVariablesPayload> {
+  constructor(data: ifaces.ListVariablesPayload, validate: boolean = true) {
+    super(models['ListVariablesPayload'],data,validate);
+  }
+}
+export function exportToListVariablesPayload(
+  data: ifaces.ListVariablesPayload
+): string {
+  const dataToExport: ListVariablesPayload = new ListVariablesPayload(data);
   return dataToExport.export();
 }
 // Query EmptyClass
@@ -520,10 +597,12 @@ export function exportToVariablesPayload(
 
 export class EmptyClass extends IOData<ifaces.EmptyClass> {
   constructor(data: ifaces.EmptyClass, validate: boolean = true) {
-    super(models["EmptyClass"], data, validate);
+    super(models['EmptyClass'],data,validate);
   }
 }
-export function exportToEmptyClass(data: ifaces.EmptyClass): string {
+export function exportToEmptyClass(
+  data: ifaces.EmptyClass
+): string {
   const dataToExport: EmptyClass = new EmptyClass(data);
   return dataToExport.export();
 }
@@ -542,11 +621,11 @@ export function exportToEmptyClass(data: ifaces.EmptyClass): string {
 
 export class QueryVariablesPayload extends IOData<ifaces.QueryVariablesPayload> {
   constructor(data: ifaces.QueryVariablesPayload, validate: boolean = true) {
-    super(models["QueryVariablesPayload"], data, validate);
+    super(models['QueryVariablesPayload'],data,validate);
   }
 }
 export function exportToQueryVariablesPayload(
-  data: ifaces.QueryVariablesPayload,
+  data: ifaces.QueryVariablesPayload
 ): string {
   const dataToExport: QueryVariablesPayload = new QueryVariablesPayload(data);
   return dataToExport.export();
@@ -566,22 +645,50 @@ export function exportToQueryVariablesPayload(
 
 export class UserInfoPayload extends IOData<ifaces.UserInfoPayload> {
   constructor(data: ifaces.UserInfoPayload, validate: boolean = true) {
-    super(models["UserInfoPayload"], data, validate);
+    super(models['UserInfoPayload'],data,validate);
   }
 }
-export function exportToUserInfoPayload(data: ifaces.UserInfoPayload): string {
+export function exportToUserInfoPayload(
+  data: ifaces.UserInfoPayload
+): string {
   const dataToExport: UserInfoPayload = new UserInfoPayload(data);
   return dataToExport.export();
 }
+// Report VariableOutput
+
+export class VariableOutput extends Output<ifaces.VariableOutput> {
+  constructor(output: CartesiReport | InspectReport) {
+    super(models['VariableOutput'],output);
+  }
+}
+export function decodeToVariableOutput(
+  output: CartesiInput | CartesiOutput | CartesiReport | InspectReport
+): VariableOutput {
+  return new VariableOutput(output as CartesiReport);
+}
+
+// Report ListVariableOutput
+
+export class ListVariableOutput extends Output<ifaces.ListVariableOutput> {
+  constructor(output: CartesiReport | InspectReport) {
+    super(models['ListVariableOutput'],output);
+  }
+}
+export function decodeToListVariableOutput(
+  output: CartesiInput | CartesiOutput | CartesiReport | InspectReport
+): ListVariableOutput {
+  return new ListVariableOutput(output as CartesiReport);
+}
+
 // Notice VariableCreated
 
 export class VariableCreated extends OutputWithProof<ifaces.VariableCreated> {
   constructor(output: CartesiOutput) {
-    super(models["VariableCreated"], output);
+    super(models['VariableCreated'],output);
   }
 }
 export function decodeToVariableCreated(
-  output: CartesiInput | CartesiOutput | CartesiReport | InspectReport,
+  output: CartesiInput | CartesiOutput | CartesiReport | InspectReport
 ): VariableCreated {
   return new VariableCreated(output as CartesiOutput);
 }
@@ -590,11 +697,11 @@ export function decodeToVariableCreated(
 
 export class VariableResolved extends OutputWithProof<ifaces.VariableResolved> {
   constructor(output: CartesiOutput) {
-    super(models["VariableResolved"], output);
+    super(models['VariableResolved'],output);
   }
 }
 export function decodeToVariableResolved(
-  output: CartesiInput | CartesiOutput | CartesiReport | InspectReport,
+  output: CartesiInput | CartesiOutput | CartesiReport | InspectReport
 ): VariableResolved {
   return new VariableResolved(output as CartesiOutput);
 }
@@ -603,11 +710,11 @@ export function decodeToVariableResolved(
 
 export class UserBalance extends OutputWithProof<ifaces.UserBalance> {
   constructor(output: CartesiOutput) {
-    super(models["UserBalance"], output);
+    super(models['UserBalance'],output);
   }
 }
 export function decodeToUserBalance(
-  output: CartesiInput | CartesiOutput | CartesiReport | InspectReport,
+  output: CartesiInput | CartesiOutput | CartesiReport | InspectReport
 ): UserBalance {
   return new UserBalance(output as CartesiOutput);
 }
@@ -616,228 +723,247 @@ export function decodeToUserBalance(
 
 export class ProbabilityUpdated extends OutputWithProof<ifaces.ProbabilityUpdated> {
   constructor(output: CartesiOutput) {
-    super(models["ProbabilityUpdated"], output);
+    super(models['ProbabilityUpdated'],output);
   }
 }
 export function decodeToProbabilityUpdated(
-  output: CartesiInput | CartesiOutput | CartesiReport | InspectReport,
+  output: CartesiInput | CartesiOutput | CartesiReport | InspectReport
 ): ProbabilityUpdated {
   return new ProbabilityUpdated(output as CartesiOutput);
 }
+
 
 /**
  * Model
  */
 
 export const models: Models = {
-  InitializePayload: {
-    ioType: "mutationPayload",
-    abiTypes: ["uint"],
-    params: ["b"],
+  'WithdrawEtherPayload': {
+    ioType:"mutationPayload",
+    abiTypes:['uint256', 'bytes'],
+    params:['amount', 'exec_layer_data'],
+    decoder: decodeToWithdrawEtherPayloadInput,
+    exporter: exportToWithdrawEtherPayload,
+    validator: ajv.compile<ifaces.WithdrawEtherPayload>(
+      JSON.parse(
+        '{"title": "WithdrawEtherPayload", "type": "object", "properties": {"amount": {"title": "Amount", "type": "integer"}, "exec_layer_data": {"title": "Exec Layer Data", "type": "string", "format": "binary"}}, "required": ["amount", "exec_layer_data"]}'.replace(
+          /integer/g,
+          'string","format":"biginteger'
+        )
+      )
+    )
+  },
+  'InitializePayload': {
+    ioType:"mutationPayload",
+    abiTypes:['uint'],
+    params:['b'],
     decoder: decodeToInitializePayloadInput,
     exporter: exportToInitializePayload,
     validator: ajv.compile<ifaces.InitializePayload>(
       JSON.parse(
         '{"title": "InitializePayload", "type": "object", "properties": {"b": {"title": "B", "type": "integer"}}, "required": ["b"]}'.replace(
           /integer/g,
-          'string","format":"biginteger',
-        ),
-      ),
-    ),
+          'string","format":"biginteger'
+        )
+      )
+    )
   },
-  AddVariablePayload: {
-    ioType: "mutationPayload",
-    abiTypes: [
-      "bytes32",
-      "uint",
-      "address",
-      // Named tuple component: viem only accepts the {aliases: [...]} object
-      // form (used by ifaces/ajv/seeds) when the component is named; the
-      // encoding is byte-identical to the generator's "(bytes32[])[]".
-      "(bytes32[] aliases)[]",
-      "bool",
-      "bytes32[]",
-      "string",
-    ],
-    params: [
-      "alias",
-      "n_states",
-      "resolve_address",
-      "cliques",
-      "new_cluster",
-      "new_cluster_aliases",
-      "info_url",
-    ],
+  'AddVariablePayload': {
+    ioType:"mutationPayload",
+    abiTypes:['bytes32', 'uint', 'address', '(bytes32[] aliases)[]', 'bool', 'bytes32[]', 'string'],
+    params:['alias', 'n_states', 'resolve_address', 'cliques', 'new_cluster', 'new_cluster_aliases', 'info_url'],
     decoder: decodeToAddVariablePayloadInput,
     exporter: exportToAddVariablePayload,
     validator: ajv.compile<ifaces.AddVariablePayload>(
       JSON.parse(
         '{"title": "AddVariablePayload", "type": "object", "properties": {"alias": {"title": "Alias", "type": "string", "format": "binary"}, "n_states": {"title": "N States", "type": "integer"}, "resolve_address": {"title": "Resolve Address", "type": "string"}, "cliques": {"title": "Cliques", "type": "array", "items": {"$ref": "#/definitions/CliqueAliases"}}, "new_cluster": {"title": "New Cluster", "type": "boolean"}, "new_cluster_aliases": {"title": "New Cluster Aliases", "type": "array", "items": {"type": "string", "format": "binary"}}, "info_url": {"title": "Info Url", "type": "string"}}, "required": ["alias", "n_states", "resolve_address", "cliques", "new_cluster", "new_cluster_aliases", "info_url"], "definitions": {"CliqueAliases": {"title": "CliqueAliases", "type": "object", "properties": {"aliases": {"title": "Aliases", "type": "array", "items": {"type": "string", "format": "binary"}}}, "required": ["aliases"]}}}'.replace(
           /integer/g,
-          'string","format":"biginteger',
-        ),
-      ),
-    ),
+          'string","format":"biginteger'
+        )
+      )
+    )
   },
-  ResolveVariablePayload: {
-    ioType: "mutationPayload",
-    abiTypes: ["bytes32", "uint"],
-    params: ["alias", "state"],
+  'ResolveVariablePayload': {
+    ioType:"mutationPayload",
+    abiTypes:['bytes32', 'uint'],
+    params:['alias', 'state'],
     decoder: decodeToResolveVariablePayloadInput,
     exporter: exportToResolveVariablePayload,
     validator: ajv.compile<ifaces.ResolveVariablePayload>(
       JSON.parse(
         '{"title": "ResolveVariablePayload", "type": "object", "properties": {"alias": {"title": "Alias", "type": "string", "format": "binary"}, "state": {"title": "State", "type": "integer"}}, "required": ["alias", "state"]}'.replace(
           /integer/g,
-          'string","format":"biginteger',
-        ),
-      ),
-    ),
+          'string","format":"biginteger'
+        )
+      )
+    )
   },
-  EditVariablesPayload: {
-    ioType: "mutationPayload",
-    abiTypes: ["uint", "int", "bytes32[]", "uint[]", "bytes32[]", "uint[]"],
-    params: [
-      "value",
-      "fund_threshold",
-      "var_aliases",
-      "var_states",
-      "evidence_aliases",
-      "evidence_states",
-    ],
+  'EditVariablesPayload': {
+    ioType:"mutationPayload",
+    abiTypes:['uint', 'int', 'bytes32[]', 'uint[]', 'bytes32[]', 'uint[]'],
+    params:['value', 'fund_threshold', 'var_aliases', 'var_states', 'evidence_aliases', 'evidence_states'],
     decoder: decodeToEditVariablesPayloadInput,
     exporter: exportToEditVariablesPayload,
     validator: ajv.compile<ifaces.EditVariablesPayload>(
       JSON.parse(
         '{"title": "EditVariablesPayload", "type": "object", "properties": {"value": {"title": "Value", "type": "integer"}, "fund_threshold": {"title": "Fund Threshold", "type": "integer"}, "var_aliases": {"title": "Var Aliases", "type": "array", "items": {"type": "string", "format": "binary"}}, "var_states": {"title": "Var States", "type": "array", "items": {"type": "integer"}}, "evidence_aliases": {"title": "Evidence Aliases", "type": "array", "items": {"type": "string", "format": "binary"}}, "evidence_states": {"title": "Evidence States", "type": "array", "items": {"type": "integer"}}}, "required": ["value", "fund_threshold", "var_aliases", "var_states", "evidence_aliases", "evidence_states"]}'.replace(
           /integer/g,
-          'string","format":"biginteger',
-        ),
-      ),
-    ),
+          'string","format":"biginteger'
+        )
+      )
+    )
   },
-  SetOperatorPayload: {
-    ioType: "mutationPayload",
-    abiTypes: ["address"],
-    params: ["new_operator_address"],
+  'SetOperatorPayload': {
+    ioType:"mutationPayload",
+    abiTypes:['address'],
+    params:['new_operator_address'],
     decoder: decodeToSetOperatorPayloadInput,
     exporter: exportToSetOperatorPayload,
     validator: ajv.compile<ifaces.SetOperatorPayload>(
       JSON.parse(
         '{"title": "SetOperatorPayload", "type": "object", "properties": {"new_operator_address": {"title": "New Operator Address", "type": "string"}}, "required": ["new_operator_address"]}'.replace(
           /integer/g,
-          'string","format":"biginteger',
-        ),
-      ),
-    ),
+          'string","format":"biginteger'
+        )
+      )
+    )
   },
-  VariablesPayload: {
-    ioType: "queryJsonPayload",
-    abiTypes: [],
-    params: ["alias"],
+  'VariablesPayload': {
+    ioType:"queryJsonPayload",
+    abiTypes:[],
+    params:['alias'],
     // decoder: decodeToVariablesPayloadInput,
     exporter: exportToVariablesPayload,
     validator: ajv.compile<ifaces.VariablesPayload>(
       JSON.parse(
-        '{"title": "VariablesPayload", "type": "object", "properties": {"alias": {"title": "Alias", "type": "string"}}, "required": ["alias"]}',
-      ),
-    ),
+        '{"title": "VariablesPayload", "type": "object", "properties": {"alias": {"title": "Alias", "type": "string"}}, "required": ["alias"]}'
+      )
+    )
   },
-  EmptyClass: {
-    ioType: "queryJsonPayload",
-    abiTypes: [],
-    params: [],
+  'ListVariablesPayload': {
+    ioType:"queryJsonPayload",
+    abiTypes:[],
+    params:['order_by', 'order_dir', 'page', 'page_size', 'include_resolved'],
+    // decoder: decodeToListVariablesPayloadInput,
+    exporter: exportToListVariablesPayload,
+    validator: ajv.compile<ifaces.ListVariablesPayload>(
+      JSON.parse(
+        '{"title": "ListVariablesPayload", "type": "object", "properties": {"order_by": {"title": "Order By", "type": "string"}, "order_dir": {"title": "Order Dir", "type": "string"}, "page": {"title": "Page", "type": "integer"}, "page_size": {"title": "Page Size", "type": "integer"}, "include_resolved": {"title": "Include Resolved", "type": "boolean"}}}'
+      )
+    )
+  },
+  'EmptyClass': {
+    ioType:"queryJsonPayload",
+    abiTypes:[],
+    params:[],
     // decoder: decodeToEmptyClassInput,
     exporter: exportToEmptyClass,
     validator: ajv.compile<ifaces.EmptyClass>(
-      JSON.parse('{"title": "EmptyClass", "type": "object", "properties": {}}'),
-    ),
+      JSON.parse(
+        '{"title": "EmptyClass", "type": "object", "properties": {}}'
+      )
+    )
   },
-  QueryVariablesPayload: {
-    ioType: "queryJsonPayload",
-    abiTypes: [],
-    params: [
-      "var_aliases",
-      "var_states",
-      "evidence_aliases",
-      "evidence_states",
-      "value",
-      "user_address",
-    ],
+  'QueryVariablesPayload': {
+    ioType:"queryJsonPayload",
+    abiTypes:[],
+    params:['var_aliases', 'var_states', 'evidence_aliases', 'evidence_states', 'value', 'user_address'],
     // decoder: decodeToQueryVariablesPayloadInput,
     exporter: exportToQueryVariablesPayload,
     validator: ajv.compile<ifaces.QueryVariablesPayload>(
       JSON.parse(
-        '{"title": "QueryVariablesPayload", "type": "object", "properties": {"var_aliases": {"title": "Var Aliases", "type": "array", "items": {"type": "string"}}, "var_states": {"title": "Var States", "type": "array", "items": {"type": "integer"}}, "evidence_aliases": {"title": "Evidence Aliases", "type": "array", "items": {"type": "string"}}, "evidence_states": {"title": "Evidence States", "type": "array", "items": {"type": "integer"}}, "value": {"title": "Value", "type": "integer"}, "user_address": {"title": "User Address", "type": "string"}}, "required": ["var_aliases", "var_states"]}',
-      ),
-    ),
+        '{"title": "QueryVariablesPayload", "type": "object", "properties": {"var_aliases": {"title": "Var Aliases", "type": "array", "items": {"type": "string"}}, "var_states": {"title": "Var States", "type": "array", "items": {"type": "integer"}}, "evidence_aliases": {"title": "Evidence Aliases", "type": "array", "items": {"type": "string"}}, "evidence_states": {"title": "Evidence States", "type": "array", "items": {"type": "integer"}}, "value": {"title": "Value", "type": "integer"}, "user_address": {"title": "User Address", "type": "string"}}, "required": ["var_aliases", "var_states"]}'
+      )
+    )
   },
-  UserInfoPayload: {
-    ioType: "queryJsonPayload",
-    abiTypes: [],
-    params: ["user_address"],
+  'UserInfoPayload': {
+    ioType:"queryJsonPayload",
+    abiTypes:[],
+    params:['user_address'],
     // decoder: decodeToUserInfoPayloadInput,
     exporter: exportToUserInfoPayload,
     validator: ajv.compile<ifaces.UserInfoPayload>(
       JSON.parse(
-        '{"title": "UserInfoPayload", "type": "object", "properties": {"user_address": {"title": "User Address", "type": "string"}}, "required": ["user_address"]}',
-      ),
-    ),
+        '{"title": "UserInfoPayload", "type": "object", "properties": {"user_address": {"title": "User Address", "type": "string"}}, "required": ["user_address"]}'
+      )
+    )
   },
-  VariableCreated: {
-    ioType: "noticeHeader",
-    abiTypes: ["bytes32", "uint", "uint"],
-    params: ["alias", "n_states", "created_at"],
+  'VariableOutput': {
+    ioType:"report",
+    abiTypes:[],
+    params:['alias', 'n_states', 'volume', 'volume_ss', 'n_operations', 'created_at', 'resolved', 'info_url', 'final_state'],
+    decoder: decodeToVariableOutput,
+    validator: ajv.compile<ifaces.VariableOutput>(
+      JSON.parse(
+        '{"title": "VariableOutput", "type": "object", "properties": {"alias": {"title": "Alias", "type": "string"}, "n_states": {"title": "N States", "type": "integer"}, "volume": {"title": "Volume", "type": "integer"}, "volume_ss": {"title": "Volume Ss", "type": "integer"}, "n_operations": {"title": "N Operations", "type": "integer"}, "created_at": {"title": "Created At", "type": "integer"}, "resolved": {"title": "Resolved", "type": "boolean"}, "info_url": {"title": "Info Url", "type": "string"}, "final_state": {"title": "Final State", "type": "integer"}}, "required": ["alias", "n_states", "volume", "volume_ss", "n_operations", "created_at", "resolved"]}'
+      )
+    )
+  },
+  'ListVariableOutput': {
+    ioType:"report",
+    abiTypes:[],
+    params:['data', 'total', 'page'],
+    decoder: decodeToListVariableOutput,
+    validator: ajv.compile<ifaces.ListVariableOutput>(
+      JSON.parse(
+        '{"title": "ListVariableOutput", "type": "object", "properties": {"data": {"title": "Data", "type": "array", "items": {"$ref": "#/definitions/VariableOutput"}}, "total": {"title": "Total", "type": "integer"}, "page": {"title": "Page", "type": "integer"}}, "required": ["data", "total", "page"], "definitions": {"VariableOutput": {"title": "VariableOutput", "type": "object", "properties": {"alias": {"title": "Alias", "type": "string"}, "n_states": {"title": "N States", "type": "integer"}, "volume": {"title": "Volume", "type": "integer"}, "volume_ss": {"title": "Volume Ss", "type": "integer"}, "n_operations": {"title": "N Operations", "type": "integer"}, "created_at": {"title": "Created At", "type": "integer"}, "resolved": {"title": "Resolved", "type": "boolean"}, "info_url": {"title": "Info Url", "type": "string"}, "final_state": {"title": "Final State", "type": "integer"}}, "required": ["alias", "n_states", "volume", "volume_ss", "n_operations", "created_at", "resolved"]}}}'
+      )
+    )
+  },
+  'VariableCreated': {
+    ioType:"noticeHeader",
+    abiTypes:['bytes32', 'uint', 'uint'],
+    params:['alias', 'n_states', 'created_at'],
     decoder: decodeToVariableCreated,
     validator: ajv.compile<ifaces.VariableCreated>(
       JSON.parse(
         '{"title": "VariableCreated", "type": "object", "properties": {"alias": {"title": "Alias", "type": "string", "format": "binary"}, "n_states": {"title": "N States", "type": "integer"}, "created_at": {"title": "Created At", "type": "integer"}}, "required": ["alias", "n_states", "created_at"]}'.replace(
           /integer/g,
-          'string","format":"biginteger',
-        ),
-      ),
-    ),
+          'string","format":"biginteger'
+        )
+      )
+    )
   },
-  VariableResolved: {
-    ioType: "noticeHeader",
-    abiTypes: ["bytes32", "uint", "uint"],
-    params: ["alias", "final_state", "timestamp"],
+  'VariableResolved': {
+    ioType:"noticeHeader",
+    abiTypes:['bytes32', 'uint', 'uint'],
+    params:['alias', 'final_state', 'timestamp'],
     decoder: decodeToVariableResolved,
     validator: ajv.compile<ifaces.VariableResolved>(
       JSON.parse(
         '{"title": "VariableResolved", "type": "object", "properties": {"alias": {"title": "Alias", "type": "string", "format": "binary"}, "final_state": {"title": "Final State", "type": "integer"}, "timestamp": {"title": "Timestamp", "type": "integer"}}, "required": ["alias", "final_state", "timestamp"]}'.replace(
           /integer/g,
-          'string","format":"biginteger',
-        ),
-      ),
-    ),
+          'string","format":"biginteger'
+        )
+      )
+    )
   },
-  UserBalance: {
-    ioType: "noticeHeader",
-    abiTypes: ["address", "uint", "uint", "uint"],
-    params: ["user", "free_funds", "expected", "timestamp"],
+  'UserBalance': {
+    ioType:"noticeHeader",
+    abiTypes:['address', 'uint', 'uint', 'uint'],
+    params:['user', 'free_funds', 'expected', 'timestamp'],
     decoder: decodeToUserBalance,
     validator: ajv.compile<ifaces.UserBalance>(
       JSON.parse(
         '{"title": "UserBalance", "type": "object", "properties": {"user": {"title": "User", "type": "string"}, "free_funds": {"title": "Free Funds", "type": "integer"}, "expected": {"title": "Expected", "type": "integer"}, "timestamp": {"title": "Timestamp", "type": "integer"}}, "required": ["user", "free_funds", "expected", "timestamp"]}'.replace(
           /integer/g,
-          'string","format":"biginteger',
-        ),
-      ),
-    ),
+          'string","format":"biginteger'
+        )
+      )
+    )
   },
-  ProbabilityUpdated: {
-    ioType: "noticeHeader",
-    abiTypes: ["bytes32", "uint[]", "uint", "uint", "uint"],
-    params: ["alias", "probabilities", "volume", "volume_ss", "timestamp"],
+  'ProbabilityUpdated': {
+    ioType:"noticeHeader",
+    abiTypes:['bytes32', 'uint[]', 'uint', 'uint', 'uint'],
+    params:['alias', 'probabilities', 'volume', 'volume_ss', 'timestamp'],
     decoder: decodeToProbabilityUpdated,
     validator: ajv.compile<ifaces.ProbabilityUpdated>(
       JSON.parse(
         '{"title": "ProbabilityUpdated", "type": "object", "properties": {"alias": {"title": "Alias", "type": "string", "format": "binary"}, "probabilities": {"title": "Probabilities", "type": "array", "items": {"type": "integer"}}, "volume": {"title": "Volume", "type": "integer"}, "volume_ss": {"title": "Volume Ss", "type": "integer"}, "timestamp": {"title": "Timestamp", "type": "integer"}}, "required": ["alias", "probabilities", "volume", "volume_ss", "timestamp"]}'.replace(
           /integer/g,
-          'string","format":"biginteger',
-        ),
-      ),
-    ),
+          'string","format":"biginteger'
+        )
+      )
+    )
   },
-};
+  };

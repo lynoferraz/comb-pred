@@ -27,13 +27,18 @@ export function decodeJsonReport(data: Hex | Uint8Array): any {
 
 export interface VariableSummary {
   alias: string;
-  states_probs: number[];
+  // Probabilities are loaded lazily (per visible card / on demand), so an
+  // entry may exist with only the lightweight fields from `list_variables`
+  // and no probabilities yet.
+  states_probs?: number[];
+  n_states?: number;
   volume: number;
   volume_ss: number;
   n_operations: number;
-  // Where the numbers came from: the latest indexed ProbabilityUpdated
-  // notice ("event") or an authoritative cim_variable inspect ("query").
-  source?: "event" | "query";
+  // Where the numbers came from: the cheap paged `list_variables` listing
+  // ("list"), the latest indexed ProbabilityUpdated notice ("event"), or an
+  // authoritative cim_variable inspect ("query").
+  source?: "list" | "event" | "query";
 }
 
 export interface LiquidationReport {
@@ -63,6 +68,23 @@ export interface VariableInfo {
   category?: string;
   tags?: string[];
   [key: string]: any;
+}
+
+// Decode a variable alias from however it comes back in a decoded input
+// payload: a 0x-padded bytes32 hex (ABI `Bytes32`) or an already-plain string.
+// Trailing NUL padding is stripped and the result lower-cased (aliases are
+// stored lower-case on the backend).
+export function bytes32ToAlias(v: unknown): string {
+  if (typeof v !== "string") return "";
+  let s = v;
+  if (isHex(v) && v.length > 2) {
+    try {
+      s = hexToString(v as Hex, { size: 32 });
+    } catch {
+      return "";
+    }
+  }
+  return s.replace(/\0+$/, "").trim().toLowerCase();
 }
 
 // Get display name for a variable (falls back to alias)

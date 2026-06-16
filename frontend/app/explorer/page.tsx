@@ -4,14 +4,19 @@ import { useEffect, useMemo, useState } from "react";
 import { toHex } from "viem";
 import { useApp } from "../lib/context";
 import {
-  buildMarkets,
+  buildMarketsFromAliases,
   composePhrase,
   cliqueCandidates,
   type Market,
   type Selection,
 } from "../lib/market";
 import { fmt } from "../lib/format";
-import { useJoint, useAnimatedNumber, ammQuery } from "../lib/useAmmQuery";
+import {
+  useJoint,
+  useAnimatedNumber,
+  useDebounced,
+  ammQuery,
+} from "../lib/useAmmQuery";
 import type { QueryResult } from "../lib/cartesi";
 import { editVariable } from "../backend-libs/cim/lib";
 import Pill from "../components/ui/Pill";
@@ -27,7 +32,8 @@ function strToBytes32(s: string): string {
 
 export default function ExplorerPage() {
   const {
-    variables,
+    aliases,
+    marketData,
     infoMap,
     graphNodes,
     ammB,
@@ -36,10 +42,15 @@ export default function ExplorerPage() {
     walletClient,
     appAddress,
     userExpected,
+    refreshUserInfo,
   } = useApp();
+  // Explorer only needs names/states/clique membership to compose forecasts;
+  // joint probabilities come from on-demand ammQuery, so build from the full
+  // alias universe + info without forcing a probability load.
   const markets = useMemo(
-    () => buildMarkets(variables, infoMap, graphNodes, ammB),
-    [variables, infoMap, graphNodes, ammB],
+    () =>
+      buildMarketsFromAliases(aliases, marketData, infoMap, graphNodes, ammB),
+    [aliases, marketData, infoMap, graphNodes, ammB],
   );
 
   const [targets, setTargets] = useState<Selection[]>([]);
@@ -71,6 +82,18 @@ export default function ExplorerPage() {
   const validReportValue =
     Number.isFinite(reportValue) && reportValue > 0 && reportValue < 1;
 
+  // The backend preview is keyed on a debounced copy of the typed value so it
+  // only fires ~1.5s after the user stops typing. When nothing is typed the
+  // report value tracks the joint cell directly, so target/evidence changes
+  // still preview immediately.
+  const debouncedValue = useDebounced(value, 1500);
+  const queryReportValue =
+    debouncedValue !== "" ? parseFloat(debouncedValue) : joint.cellProb;
+  const validQueryValue =
+    Number.isFinite(queryReportValue) &&
+    queryReportValue > 0 &&
+    queryReportValue < 1;
+
   // ── Backend preview: cost, revenue, edit_bounds, etc. (needs wallet) ──────
   const tKey = JSON.stringify(targets);
   const evKey = JSON.stringify(evidence);
@@ -79,38 +102,35 @@ export default function ExplorerPage() {
       !walletAddress ||
       !appAddress ||
       targets.length === 0 ||
-      !validReportValue
+      !validQueryValue
     ) {
       setPreview(null);
       return;
     }
     let cancelled = false;
-    const id = setTimeout(() => {
-      setPreviewLoading(true);
-      ammQuery(config, {
-        varAliases: targets.map((t) => t.alias),
-        varStates: targets.map((t) => t.stateIdx),
-        evidenceAliases: evidence.map((e) => e.alias),
-        evidenceStates: evidence.map((e) => e.stateIdx),
-        value: reportValue,
-        userAddress: walletAddress,
+    setPreviewLoading(true);
+    ammQuery(config, {
+      varAliases: targets.map((t) => t.alias),
+      varStates: targets.map((t) => t.stateIdx),
+      evidenceAliases: evidence.map((e) => e.alias),
+      evidenceStates: evidence.map((e) => e.stateIdx),
+      value: queryReportValue,
+      userAddress: walletAddress,
+    })
+      .then((res) => {
+        if (!cancelled) setPreview(res);
       })
-        .then((res) => {
-          if (!cancelled) setPreview(res);
-        })
-        .catch(() => {
-          if (!cancelled) setPreview(null);
-        })
-        .finally(() => {
-          if (!cancelled) setPreviewLoading(false);
-        });
-    }, 400);
+      .catch(() => {
+        if (!cancelled) setPreview(null);
+      })
+      .finally(() => {
+        if (!cancelled) setPreviewLoading(false);
+      });
     return () => {
       cancelled = true;
-      clearTimeout(id);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tKey, evKey, reportValue, walletAddress, appAddress, validReportValue]);
+  }, [tKey, evKey, queryReportValue, walletAddress, appAddress, validQueryValue]);
 
   const bounds = preview?.user_edit_bounds as [number, number] | undefined;
   const costEth =
@@ -123,6 +143,21 @@ export default function ExplorerPage() {
       : undefined;
   // shares = winDelta = revenueDelta
   const shares = revenueEth;
+  // Expected funds if this cell wins: the user_expected_value row matching the
+  // reported assignment, plus the revenue this report would add
+  // (user_revenue_delta). Δ is vs the user's current overall expected balance,
+  // like the Positions table.
+  const expectedRow = preview?.user_expected_value?.find((r) =>
+    targets.every((t) => Number(r[t.alias]) === t.stateIdx),
+  );
+  const expectedFundsEth =
+    expectedRow !== undefined && revenueEth !== undefined
+      ? Number(expectedRow.value) / 1e18 + revenueEth
+      : undefined;
+  const expectedDelta =
+    expectedFundsEth !== undefined && userExpected !== undefined
+      ? expectedFundsEth - userExpected
+      : undefined;
   const outOfBounds =
     !!bounds &&
     validReportValue &&
@@ -163,7 +198,10 @@ export default function ExplorerPage() {
         client: walletClient,
       });
       setSubmitted(true);
-      setTimeout(() => setSubmitted(false), 4500);
+      // Reflect the spend on the header balance (backend may lag; the user
+      // can refresh again once it settles).
+      await refreshUserInfo();
+      setTimeout(() => setSubmitted(false), 8000);
     } catch (err: any) {
       setError(err.message || "Submit failed");
     } finally {
@@ -336,31 +374,47 @@ export default function ExplorerPage() {
                     )}
                     <div className="flex justify-between text-xs">
                       <span className="text-ink2">Shares</span>
-                      <span className="font-mono font-semibold text-ink">
+                      <span
+                        className={`font-mono font-semibold text-ink ${previewLoading ? "loading-value" : ""}`}
+                      >
                         {shares !== undefined
                           ? fmt.eth(shares * 1000000, 1) + "u"
                           : "—"}
                       </span>
                     </div>
                     <div className="flex justify-between text-xs">
-                      <span className="text-ink2">Cost now</span>
-                      <span className="font-mono font-semibold text-ink">
+                      <span className="text-ink2">
+                        {(costEth ?? 0) > 0 ? "Revenue now" : "Cost now"}
+                      </span>
+                      <span
+                        className={`font-mono font-semibold ${(costEth ?? 0) > 0 ? "text-accent" : "text-ink"} ${previewLoading ? "loading-value" : ""}`}
+                      >
                         {costEth !== undefined
-                          ? fmt.eth(Math.abs(costEth), 5) + " ETH"
+                          ? (costEth > 0 ? "+" : "") +
+                            fmt.eth(Math.abs(costEth), 5) +
+                            " ETH"
                           : "—"}
                       </span>
                     </div>
                     <div className="flex justify-between text-xs">
-                      <span className="text-ink2">Revenue if right</span>
+                      <span className="text-ink2">Expected if right</span>
+                      <span
+                        className={`font-mono font-semibold text-ink ${previewLoading ? "loading-value" : ""}`}
+                      >
+                        {expectedFundsEth !== undefined
+                          ? fmt.eth(expectedFundsEth, 5) + " ETH"
+                          : "—"}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-xs">
+                      <span className="text-ink2">Δ vs expected</span>
                       <span
                         className={`font-mono font-semibold ${
-                          (revenueEth ?? 0) >= 0 ? "text-accent" : "text-no"
-                        }`}
+                          (expectedDelta ?? 0) >= 0 ? "text-accent" : "text-no"
+                        } ${previewLoading ? "loading-value" : ""}`}
                       >
-                        {revenueEth !== undefined
-                          ? (revenueEth >= 0 ? "+" : "−") +
-                            fmt.eth(Math.abs(revenueEth), 5) +
-                            " ETH"
+                        {expectedDelta !== undefined
+                          ? fmt.signed(expectedDelta, 5) + " ETH"
                           : "—"}
                       </span>
                     </div>
@@ -387,6 +441,10 @@ export default function ExplorerPage() {
                         {isConditional
                           ? ` · conditional on ${evidence.length}`
                           : ""}
+                      </div>
+                      <div className="text-[11px] opacity-85 mt-1.5 leading-snug">
+                        It can take some time for the backend to process the
+                        input — probabilities will update once it's confirmed.
                       </div>
                     </div>
                   </div>
@@ -459,6 +517,25 @@ function VariableSection({
     [required, markets, graphNodes],
   );
   const [picking, setPicking] = useState(false);
+  const [query, setQuery] = useState("");
+  // Reset the search box whenever the picker opens/closes.
+  useEffect(() => {
+    if (!picking) setQuery("");
+  }, [picking]);
+
+  const shown = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return available;
+    return available.filter(
+      (m) =>
+        m.name.toLowerCase().includes(q) ||
+        m.short.toLowerCase().includes(q) ||
+        m.alias.toLowerCase().includes(q) ||
+        m.category.toLowerCase().includes(q) ||
+        m.tags.some((t) => t.toLowerCase().includes(q)) ||
+        m.states.some((s) => s.name.toLowerCase().includes(q)),
+    );
+  }, [available, query]);
 
   return (
     <div className="bg-surface rounded-card border border-line p-[18px] flex flex-col gap-3.5">
@@ -559,7 +636,19 @@ function VariableSection({
               ×
             </button>
           </div>
-          {available.map((m) => (
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            autoFocus
+            placeholder="Search variables…"
+            className="mb-1 w-full bg-surface border border-line rounded-md px-2.5 py-1.5 text-[12px] text-ink outline-none focus:border-ink4"
+          />
+          {shown.length === 0 && (
+            <div className="px-2.5 py-3 text-[12px] text-ink3 text-center">
+              No variables match “{query}”.
+            </div>
+          )}
+          {shown.map((m) => (
             <button
               key={m.alias}
               onClick={() => {
@@ -578,7 +667,7 @@ function VariableSection({
               </div>
               <span className="text-[11px] font-mono text-ink3">
                 {m.states.length === 2
-                  ? `${Math.round((m.states[0]?.prob ?? 0) * 100)}% YES`
+                  ? `${Math.round((m.states[0]?.prob ?? 0) * 100)}% ${m.states[0].name}`
                   : `${m.states.length}-way`}
               </span>
             </button>
@@ -653,7 +742,7 @@ function ResultCard({
       <div
         className={`font-mono text-[72px] font-semibold tracking-tighter leading-none mt-1.5 transition-colors ${
           isConditional ? "text-accent-deep" : "text-ink"
-        }`}
+        } ${loading ? "loading-value" : ""}`}
       >
         {v.toFixed(4)}
       </div>

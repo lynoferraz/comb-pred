@@ -6,8 +6,21 @@
  */
 
 export interface _Master_ {
-  IndexerPayload: IndexerPayload;
   IndexerOutput: IndexerOutput;
+  IndexerPayload: IndexerPayload;
+}
+export interface IndexerOutput {
+  data: OutputIndex[];
+  total: number;
+  page: number;
+}
+export interface OutputIndex {
+  type: string;
+  module: string;
+  class_name: string;
+  input_index: number;
+  output_index?: number;
+  app_contract?: string;
 }
 export interface IndexerPayload {
   tags?: string[] | null;
@@ -27,17 +40,4 @@ export interface IndexerPayload {
   order_dir?: string | null;
   page?: number | null;
   page_size?: number | null;
-}
-export interface IndexerOutput {
-  data: OutputIndex[];
-  total: number;
-  page: number;
-}
-export interface OutputIndex {
-  type: string;
-  module: string;
-  class_name: string;
-  input_index: number;
-  output_index?: number;
-  app_contract?: string;
 }

@@ -9,7 +9,7 @@ from typing import Optional, List
 from cartesi.abi import Address, UInt, Bytes32, String, Int, Bool
 
 from cartesapp.input import query, mutation
-from cartesapp.output import add_output, event, emit_event, index_input, submit_contract_call
+from cartesapp.output import output, add_output, event, emit_event, index_input, submit_contract_call
 from cartesapp.context import get_metadata, get_ledger
 from cartesapp.storage import Entity, helpers
 from cartesapplib.ledger.app_ledger import ETHER_PORTAL_ADDRESS, DepositEtherPayload, WITHDRAW_ETHER, WithdrawEtherPayload
@@ -70,6 +70,13 @@ class EditVariablesPayload(BaseModel):
 class VariablesPayload(BaseModel):
     alias: str
 
+class ListVariablesPayload(BaseModel):
+    order_by: Optional[str]
+    order_dir: Optional[str]
+    page: Optional[int]
+    page_size: Optional[int]
+    include_resolved: Optional[bool]
+
 class QueryVariablesPayload(BaseModel):
     var_aliases: List[str]
     var_states: List[int]
@@ -108,7 +115,25 @@ class ProbabilityUpdated(BaseModel):
     volume_ss:      UInt
     timestamp:      UInt
 
+@output()
+class VariableOutput(BaseModel):
+    alias: str
+    n_states: int
+    volume: int
+    volume_ss: int
+    n_operations: int
+    created_at: int
+    resolved: bool
+    info_url: Optional[str]
+    final_state: Optional[int]
+
 ###
+@output()
+class ListVariableOutput(BaseModel):
+    data:   List[VariableOutput]
+    total:  int
+    page:   int
+
 # Auxs
 
 def bytes32toStr(data: bytes) -> str:
@@ -153,7 +178,8 @@ def emit_probability_updates(affected_aliases: list, tags: list, timestamp: int)
 @mutation(no_module_header=True,
     msg_sender=ETHER_PORTAL_ADDRESS,
     no_header=True,
-    packed=True
+    packed=True,
+    specialized_template=False,
 )
 def deposit_ether(payload: DepositEtherPayload) -> bool:
     metadata = get_metadata()
@@ -177,7 +203,7 @@ def deposit_ether(payload: DepositEtherPayload) -> bool:
     LOGGER.debug(f"{payload.sender} deposited {payload.amount} ether (wei)")
     return True
 
-@mutation(fixed_header=WITHDRAW_ETHER)
+@mutation(no_module_header=True, fixed_header=WITHDRAW_ETHER)
 def WithdrawEther(payload: WithdrawEtherPayload) -> bool:
     metadata = get_metadata()
     ledger = get_ledger()
@@ -329,7 +355,7 @@ def resolve_variable(payload: ResolveVariablePayload) -> bool:
     try:
         bp, users_updated = Model().amm.perform_resolve((alias,payload.state))
     except Exception as e:
-        msg = f"Couldn't add variable: {e}"
+        msg = f"Couldn't resolve variable: {e}"
         LOGGER.error(msg)
         add_output(msg)
         return False
@@ -430,7 +456,7 @@ def edit_variable(payload: EditVariablesPayload) -> bool:
 
     volume_changes = {}
     try:
-        bp, shares = Model().amm.perform_edit(report, metadata.msg_sender, payload.fund_threshold)
+        bp, shares = Model().amm.perform_edit(report, metadata.msg_sender, payload.fund_threshold / CoreSettings().precision_div)
         for state_assignment in shares:
             share_value = shares[state_assignment] * CoreSettings().precision_div
             for var_name, _ in state_assignment:
@@ -444,7 +470,7 @@ def edit_variable(payload: EditVariablesPayload) -> bool:
                     volume_changes[var_name][1] += share_value
 
     except Exception as e:
-        msg = f"Couldn't add variable: {e}"
+        msg = f"Couldn't edit variable: {e}"
         LOGGER.error(msg)
         add_output(msg)
         return False
@@ -520,6 +546,46 @@ def variable(payload: VariablesPayload) -> bool:
     }
     add_output(variable_output)
 
+    return True
+
+# Cheap paged listing over the Variable entity for the markets grid. Returns
+# only stored fields (volume, volume_ss, n_operations, n_states, ...) so it
+# never runs belief propagation — probabilities are loaded lazily per visible
+# card via the `variable` query / indexed ProbabilityUpdated notices. Ordering
+# and paging are done in the DB, modeled on cartesapplib's get_indexes.
+LIST_VARIABLES_COLUMNS = {"volume", "volume_ss", "n_operations", "created_at", "alias"}
+
+@query()
+def list_variables(payload: ListVariablesPayload) -> bool:
+    variable_query = Variable.select()
+    if not payload.include_resolved:
+        variable_query = variable_query.filter(lambda r: not r.resolved)
+
+    total = variable_query.count()
+
+    order_by = payload.order_by if payload.order_by in LIST_VARIABLES_COLUMNS else "volume"
+    order_dir = payload.order_dir if payload.order_dir in ("asc", "desc") else "desc"
+    dir_fn = helpers.desc if order_dir == "desc" else (lambda d: d)
+    variable_query = variable_query.order_by(dir_fn(getattr(Variable, order_by)))
+
+    page = payload.page if payload.page is not None and payload.page > 0 else 1
+    page_size = payload.page_size if payload.page_size is not None and payload.page_size > 0 else 24
+
+    data = [{
+            "alias": v.alias,
+            "info_url": v.info_url,
+            "n_states": v.n_states,
+            "volume": v.volume,
+            "volume_ss": v.volume_ss,
+            "n_operations": v.n_operations,
+            "created_at": v.created_at,
+            "resolved": bool(v.resolved),
+            "final_state": v.final_state,
+        }
+        for v in variable_query.page(page, page_size)
+    ]
+
+    add_output({"data": data, "total": total, "page": page})
     return True
 
 @query()

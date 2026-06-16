@@ -22,6 +22,7 @@ import {
 import {
   graph as fetchGraphApi,
   variable as fetchVariableApi,
+  listVariables as fetchListVariablesApi,
   operatorAddress as fetchOperatorAddr,
   userInfo as fetchUserInfoApi,
 } from "../backend-libs/cim/lib";
@@ -32,8 +33,23 @@ import {
   getInspectOptions,
 } from "./cartesi";
 import type { BaseLayerWalletClient } from "../backend-libs/cartesapp/utils";
-import { useVariableInfoMap } from "./useVariableInfo";
+import { useAllVariableInfo } from "./useVariableInfo";
 import { fetchMarketSnapshot } from "./snapshot";
+
+// Result of one cheap `list_variables` page: the page's aliases (in backend
+// sort order) plus the total count for pagination.
+export interface VariablePage {
+  aliases: string[];
+  total: number;
+  page: number;
+}
+
+export interface ListVariablesOptions {
+  orderBy?: "volume" | "n_operations" | "alias";
+  orderDir?: "asc" | "desc";
+  page?: number;
+  pageSize?: number;
+}
 
 // --- localStorage persistence ---
 
@@ -83,15 +99,23 @@ interface AppState {
   disconnect: () => void;
   aliases: string[];
   variables: VariableSummary[];
+  marketData: Record<string, VariableSummary>;
   graphNodes: string[][];
   graphEdges: [string[], string[]][];
   loading: boolean;
   error: string | null;
   refresh: () => Promise<void>;
+  // Lazy passive load of probabilities for visible cards (cheap indexed
+  // ProbabilityUpdated reads); skips already-loaded/in-flight aliases.
+  ensureProbabilities: (aliases: string[]) => Promise<void>;
+  // Authoritative on-demand read via the belief-propagation inspect.
   ensureVariables: (
     aliases: string[],
     opts?: { force?: boolean },
   ) => Promise<void>;
+  // Cheap paged/ordered listing over the Variable entity (no belief
+  // propagation); merges lightweight fields into marketData.
+  listVariables: (opts?: ListVariablesOptions) => Promise<VariablePage>;
   config: AppConfig;
   operatorAddr: string | undefined;
   isOperator: boolean;
@@ -134,11 +158,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // without depending on the state object (which would change its identity
   // on every batch and re-trigger consumers' effects).
   const marketDataRef = useRef<Record<string, VariableSummary>>({});
+  // Per-field merge: a `list_variables` row carries volume/ops/n_states but no
+  // probabilities, while a snapshot/query carries probabilities — merging
+  // (rather than replacing) lets each source fill its fields without wiping
+  // the other's.
   const mergeMarketData = useCallback((batch: VariableSummary[]) => {
-    for (const v of batch) marketDataRef.current[v.alias] = v;
+    for (const v of batch)
+      marketDataRef.current[v.alias] = {
+        ...marketDataRef.current[v.alias],
+        ...v,
+      };
     setMarketData((prev) => {
       const next = { ...prev };
-      for (const v of batch) next[v.alias] = v;
+      for (const v of batch) next[v.alias] = { ...next[v.alias], ...v };
       return next;
     });
   }, []);
@@ -250,8 +282,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     !!operatorAddr &&
     walletAddress.toLowerCase() === operatorAddr;
 
-  // Fetch and cache variable info from /api/info/<alias>
-  const infoMap = useVariableInfoMap(aliases);
+  // Variable info for the whole universe: one bundled manifest fetch, with a
+  // per-alias registry fallback for runtime-added variables.
+  const infoMap = useAllVariableInfo(aliases);
 
   // Market data per alias, in junction-tree alias order. Entries appear
   // progressively as the snapshot batches resolve.
@@ -323,10 +356,86 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [appAddress, nodeAddress, mergeMarketData],
   );
 
-  // Cheap two-step load: one graph inspect for the junction tree (which
-  // also yields the unresolved alias list — resolved variables are removed
-  // from the tree), then the latest indexed ProbabilityUpdated notice per
-  // alias. No belief-propagation inspects involved.
+  // Tier-1 passive load of probabilities for the given aliases via the cheap
+  // indexed ProbabilityUpdated notices (no machine execution). Used to fill
+  // the donuts of cards as they become visible. Skips aliases that already
+  // have probabilities or are in flight.
+  const probsInFlight = useRef<Set<string>>(new Set());
+  const ensureProbabilities = useCallback(
+    async (targets: string[]) => {
+      if (!appAddress || !nodeAddress) return;
+      const todo = targets.filter(
+        (a) =>
+          !probsInFlight.current.has(a) &&
+          marketDataRef.current[a]?.states_probs === undefined,
+      );
+      if (todo.length === 0) return;
+      for (const a of todo) probsInFlight.current.add(a);
+      try {
+        await fetchMarketSnapshot(
+          todo,
+          { appAddress, nodeAddress },
+          (batch) => mergeMarketData(batch),
+        );
+      } finally {
+        for (const a of todo) probsInFlight.current.delete(a);
+      }
+    },
+    [appAddress, nodeAddress, mergeMarketData],
+  );
+
+  // Cheap paged/ordered listing over the Variable entity. Merges the
+  // lightweight fields (volume/volume_ss/n_operations/n_states) into
+  // marketData so cards can render and sort without belief propagation;
+  // probabilities are filled in afterwards by ensureProbabilities.
+  const listVariables = useCallback(
+    async (opts?: ListVariablesOptions): Promise<VariablePage> => {
+      if (!appAddress || !nodeAddress)
+        return { aliases: [], total: 0, page: 1 };
+      const report = await fetchListVariablesApi(
+        {
+          order_by: opts?.orderBy ?? "volume",
+          order_dir: opts?.orderDir ?? "desc",
+          page: opts?.page ?? 1,
+          page_size: opts?.pageSize ?? 24,
+          include_resolved: false,
+        },
+        {
+          ...getInspectOptions({ appAddress, nodeAddress }),
+          decode: true,
+          decodeModel: "json",
+        },
+      );
+      const data = report as {
+        data?: Array<Record<string, any>>;
+        total?: number;
+        page?: number;
+      };
+      const rows = data.data ?? [];
+      if (rows.length > 0)
+        mergeMarketData(
+          rows.map((r) => ({
+            alias: r.alias,
+            n_states: r.n_states,
+            volume: r.volume,
+            volume_ss: r.volume_ss,
+            n_operations: r.n_operations,
+            source: "list" as const,
+          })),
+        );
+      return {
+        aliases: rows.map((r) => r.alias as string),
+        total: data.total ?? rows.length,
+        page: data.page ?? opts?.page ?? 1,
+      };
+    },
+    [appAddress, nodeAddress, mergeMarketData],
+  );
+
+  // Load the junction tree: one graph inspect yields the cliques/edges/`b`
+  // and the unresolved alias list (resolved variables are removed from the
+  // tree). Probabilities and the lightweight listing load lazily, on demand —
+  // no bulk per-variable fetch here.
   const refreshing = useRef(false);
   const refresh = useCallback(async () => {
     if (!appAddress || !nodeAddress || refreshing.current) return;
@@ -354,29 +463,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
         new Set(nodes.flat().filter((a) => !a.startsWith("_"))),
       ).sort();
       setAliases(derived);
-
-      const received = new Set<string>();
-      await fetchMarketSnapshot(
-        derived,
-        { appAddress, nodeAddress },
-        (batch) => {
-          for (const v of batch) received.add(v.alias);
-          mergeMarketData(batch);
-        },
-      );
-
-      // Aliases without an indexed event (emission can fail silently on
-      // the backend) fall back to the authoritative inspect; force so a
-      // stale entry from a previous refresh doesn't mask the gap.
-      const missing = derived.filter((a) => !received.has(a));
-      if (missing.length > 0) await ensureVariables(missing, { force: true });
     } catch (err: any) {
       setError(err.message || "Failed to load markets");
     } finally {
       refreshing.current = false;
       setLoading(false);
     }
-  }, [appAddress, nodeAddress, ensureVariables]);
+  }, [appAddress, nodeAddress]);
 
   useEffect(() => {
     if (appAddress) refresh();
@@ -432,12 +525,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
         disconnect,
         aliases,
         variables,
+        marketData,
         graphNodes,
         graphEdges,
         loading,
         error,
         refresh,
+        ensureProbabilities,
         ensureVariables,
+        listVariables,
         config,
         operatorAddr,
         isOperator,

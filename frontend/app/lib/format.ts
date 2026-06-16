@@ -40,72 +40,55 @@ export interface SimResult {
 // Live simulation. pOld is the chosen state's current probability.
 // otherProbs is the list of probabilities for every OTHER state (length 1 for
 // binary). Pass [] for a degenerate one-state market (returns zeros).
+//
+// Model (matches the AMM): a report shifts each state's value V = b·ln(q) by
+// ±a — the N−1 non-target states each drop by `a`, the target rises by
+// (N−1)·a. After renormalising, the target probability satisfies
+//   logit(p_new) = logit(p_old) + N·a/b,
+// so the cost a = (b/N)·(logit(p_new) − logit(p_old)). The funds gained if the
+// target wins is the target's value increase, (N−1)·a.
 export function simReport(
   b: number,
   pOld: number,
   pNew: number,
   otherProbs: number[],
 ): SimResult {
-  if (!(b > 0) || otherProbs.length === 0) {
+  const nStates = otherProbs.length + 1;
+  if (!(b > 0) || nStates < 2) {
     return { winDelta: 0, costDelta: 0, shares: 0, revenueDelta: 0 };
   }
   const po = clamp(pOld);
   const pn = clamp(pNew);
-  const oneMinusPo = 1 - po;
 
-  const winDelta = b * Math.log(pn / po);
-
-  // Binary: the single "other" has prob 1-po, so the factor p_other/(1-po) = 1.
-  // Multi-state: take the min (worst case for the user).
-  const baseTerm = Math.log((1 - pn) / oneMinusPo);
-  let costDelta: number;
-  if (otherProbs.length === 1) {
-    costDelta = b * baseTerm;
-  } else {
-    let minCost = Infinity;
-    for (const pother of otherProbs) {
-      const p = clamp(pother);
-      const c = b * (baseTerm + Math.log(p / oneMinusPo));
-      if (c < minCost) minCost = c;
-    }
-    costDelta = minCost === Infinity ? 0 : minCost;
-  }
+  const logit = (p: number) => Math.log(p / (1 - p));
+  // Funds the user pays now (positive when pushing the target up).
+  const a = (b / nStates) * (logit(pn) - logit(po));
+  const winDelta = (nStates - 1) * a; // target's funds increase if it wins
   return {
     winDelta,
-    costDelta,
+    costDelta: -a, // signed: negative when the user pays
     shares: winDelta,
-    revenueDelta: winDelta - costDelta,
+    revenueDelta: winDelta - a,
   };
 }
 
-// Inverse for the beginner tab: how high does p_new need to go so that the
-// user "spends" `amount` ETH (i.e. so that |cost_delta| ≈ amount)? We treat
-// amount as |cost_delta| under the same min-over-others rule, so for
-// multi-state markets there is a fixed offset C from the worst-case state.
 export function pFromSpend(
   b: number,
   pOld: number,
   amount: number,
   otherProbs: number[],
 ): number {
-  if (!(b > 0) || amount <= 0 || otherProbs.length === 0) return pOld;
+  const nOtherStates = otherProbs.length;
+  if (!(b > 0) || amount <= 0) return pOld;
   const po = clamp(pOld);
-  const oneMinusPo = 1 - po;
-
-  // Solve   amount = -[ b · ln((1-pn)/(1-po) · pmin/(1-po)) ]
-  //              = b · ln((1-po)/(1-pn)) + b · ln((1-po)/pmin)
-  //   ⇒ pn = 1 - (1-po) · exp(-(amount - C) / b)
-  // where C = b · ln((1-po) / pmin)   (= 0 for binary).
-  let pmin = oneMinusPo; // binary default
-  if (otherProbs.length > 1) {
-    pmin = Infinity;
-    for (const p of otherProbs) if (p > 0 && p < pmin) pmin = p;
-    if (!isFinite(pmin)) pmin = oneMinusPo;
+  const e = Math.exp(-amount / b);
+  let notTargetP = 0;
+  for (let i = 0; i < otherProbs.length; i += 1) {
+    notTargetP += clamp(otherProbs[i] * e);
   }
-  const C = b * Math.log(oneMinusPo / pmin);
-  const exponent = (amount - C) / b;
-  if (exponent <= 0) return po; // nothing left after worst-case offset
-  return clamp(1 - oneMinusPo * Math.exp(-exponent));
+  // const e = Math.exp(-amount / b);
+  // const notTargetP = (1 + e) * (1 - po);
+  return clamp(1 - notTargetP);
 }
 
 // Per-state palette for charts/bars (CSS variables resolved by the browser).

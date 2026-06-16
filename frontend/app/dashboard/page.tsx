@@ -3,11 +3,11 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { useApp } from "../lib/context";
-import { getInspectOptions } from "../lib/cartesi";
+import { getInspectOptions, bytes32ToAlias } from "../lib/cartesi";
 import { getOutputs } from "../backend-libs/cim/lib";
 import { fmt } from "../lib/format";
 import {
-  buildMarkets,
+  buildMarketsFromAliases,
   informativeVars,
   collapseRows,
   type Market,
@@ -35,16 +35,19 @@ export default function DashboardPage() {
     userFreeFunds,
     userExpected,
     refreshUserInfo,
-    variables,
+    aliases,
+    marketData,
     infoMap,
     graphNodes,
     ammB,
   } = useApp();
   const router = useRouter();
 
+  // Position/liquidation values come from on-demand ammQuery; this map is only
+  // for variable/state names, so build it from info without a probability load.
   const allMarkets = useMemo(
-    () => buildMarkets(variables, infoMap, graphNodes, ammB),
-    [variables, infoMap, graphNodes, ammB],
+    () => buildMarketsFromAliases(aliases, marketData, infoMap, graphNodes, ammB),
+    [aliases, marketData, infoMap, graphNodes, ammB],
   );
 
   const [history, setHistory] = useState<BalancePoint[]>([]);
@@ -102,7 +105,11 @@ export default function DashboardPage() {
     }
   }, [walletAddress, appAddress, refreshUserInfo, fetchHistory]);
 
-  // Fetch expected-value tables for every (real) clique.
+  // Fetch expected-value tables, but only for the cliques the user actually
+  // has a position in. Rather than querying every clique, we first read the
+  // user's indexed `edit` inputs (tags edit + balance + their address) to learn
+  // which variables they've traded, then restrict to cliques containing a
+  // still-unresolved one of those variables.
   const fetchPositions = useCallback(async () => {
     if (!walletAddress || !appAddress || graphNodes.length === 0) {
       setPositions([]);
@@ -110,8 +117,50 @@ export default function DashboardPage() {
     }
     setPositionsLoading(true);
     try {
+      // 1. Variables this user has edited (paged through all edit inputs).
+      const edited = new Set<string>();
+      const pageSize = 50;
+      let page = 1;
+      for (;;) {
+        const res = await getOutputs(
+          {
+            tags: ["edit", "balance", walletAddress],
+            type: "input",
+            order_by: "input_index",
+            order_dir: "desc",
+            page,
+            page_size: pageSize,
+          },
+          getInspectOptions(config),
+        );
+        for (const d of res.data as Array<Record<string, any>>) {
+          for (const a of [
+            ...(d.var_aliases ?? []),
+            ...(d.evidence_aliases ?? []),
+          ])
+            {
+              const alias = bytes32ToAlias(a);
+              if (alias) edited.add(alias);
+            }
+        }
+        if (res.data.length < pageSize || page * pageSize >= res.total) break;
+        page++;
+      }
+
+      // 2. Keep only still-unresolved variables (resolves drop out of the JT),
+      //    then the cliques that contain at least one of them.
+      const live = new Set(graphNodes.flat());
+      const relevant = new Set(
+        [...edited].filter((a) => live.has(a)),
+      );
+      const cliques =
+        relevant.size === 0
+          ? []
+          : graphNodes.filter((c) => c.some((a) => relevant.has(a)));
+
+      // 3. Expected-value table per relevant clique.
       const results = await Promise.all(
-        graphNodes.map(async (clique): Promise<PositionTable | null> => {
+        cliques.map(async (clique): Promise<PositionTable | null> => {
           const real = clique.filter((a) => !a.startsWith("_"));
           if (real.length === 0) return null;
           try {

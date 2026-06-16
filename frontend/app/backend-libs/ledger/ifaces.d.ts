@@ -6,15 +6,21 @@
  */
 
 export interface _Master_ {
-  Erc721Voucher: Erc721Voucher;
-  Erc1155SingleVoucher: Erc1155SingleVoucher;
-  Erc20Voucher: Erc20Voucher;
   Erc1155BatchVoucher: Erc1155BatchVoucher;
+  Erc20Voucher: Erc20Voucher;
+  Erc1155SingleVoucher: Erc1155SingleVoucher;
+  Erc721Voucher: Erc721Voucher;
 }
-export interface Erc721Voucher {
+export interface Erc1155BatchVoucher {
   sender: string;
   receiver: string;
-  token_id: number;
+  token_ids: number[];
+  amounts: number[];
+  data: string;
+}
+export interface Erc20Voucher {
+  receiver: string;
+  amount: number;
 }
 export interface Erc1155SingleVoucher {
   sender: string;
@@ -23,14 +29,8 @@ export interface Erc1155SingleVoucher {
   amount: number;
   data: string;
 }
-export interface Erc20Voucher {
-  receiver: string;
-  amount: number;
-}
-export interface Erc1155BatchVoucher {
+export interface Erc721Voucher {
   sender: string;
   receiver: string;
-  token_ids: number[];
-  amounts: number[];
-  data: string;
+  token_id: number;
 }
