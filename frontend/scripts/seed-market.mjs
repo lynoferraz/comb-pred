@@ -18,25 +18,42 @@
  * with the frontend. This file is run through scripts/register-ts.mjs, which
  * lets plain Node import those TypeScript modules (see `npm run seed`).
  *
- * Configuration via environment variables (sensible local-anvil defaults):
- *   NODE_URL        Cartesi node URL          (default http://localhost:8080)
- *   APP_NAME        Application name/slug     (default app)
+ * Configuration via environment variables. The frontend `.env` (or the file
+ * named by ENV_FILE) is loaded automatically, so the NEXT_PUBLIC_* deployment
+ * values are reused as fallbacks; plain (unprefixed) vars take precedence.
+ *
+ *   NODE_URL        Cartesi node URL          (fallback NEXT_PUBLIC_NODE_URL,
+ *                                              default http://localhost:8080)
+ *   APP_NAME        Application name/slug     (fallback NEXT_PUBLIC_APP_NAME,
+ *                                              default app)
  *   APP_ADDRESS     Application address       (default: resolved from APP_NAME)
+ *   CHAIN_ID        Base-layer chain id       (fallback NEXT_PUBLIC_CHAIN_ID,
+ *                                              default 31337 = local anvil)
+ *   RPC_URL         Base-layer RPC URL        (fallback NEXT_PUBLIC_RPC_URL;
+ *                                              required for chains unknown to
+ *                                              viem, optional otherwise)
  *   OPERATOR_KEY    Operator private key      (default anvil account #0)
- *   L1_RPC          Base-layer RPC URL        (default: anvil chain default)
  *   RESOLVE_ADDRESS Resolver for variables    (default: operator address)
  *   INFO_BASE_URL   Base for info_url values  (default "" -> relative /api/info/<alias>)
  *   B_PARAM         AMM liquidity parameter b in ETH (default from model file)
  *   AMM_DEPOSIT     Ether to deposit to fund the AMM, in ETH (default from model file)
  *   SKIP_DEPOSIT    If set, skip the funding deposit step
+ *   ENV_FILE        Path to the env file to load (default ./.env)
  */
 
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
-import { createWalletClient, http, parseEther, getAddress } from "viem";
+import {
+  createWalletClient,
+  http,
+  custom,
+  parseEther,
+  getAddress,
+  defineChain,
+} from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { anvil } from "viem/chains";
+import * as chains from "viem/chains";
 import { walletActionsL1 } from "@cartesi/viem";
 
 import { initializeAmm, addVariable } from "../app/backend-libs/cim/lib.ts";
@@ -44,21 +61,63 @@ import { getAppAddress } from "../app/backend-libs/cartesapp/utils.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
+// Load the frontend env file (Next does this automatically; plain node does
+// not). Plain process.env still wins, so CLI/CI overrides keep working.
+const envFile = process.env.ENV_FILE || resolve(__dirname, "../.env");
+let envLoaded = false;
+try {
+  process.loadEnvFile(envFile);
+  envLoaded = true;
+} catch {
+  // No env file is fine — rely on the process environment / defaults.
+}
+
 // --- Config ---------------------------------------------------------------
 
-const NODE_URL = process.env.NODE_URL || "http://localhost:8080";
-const APP_NAME = process.env.APP_NAME || "app";
+const env = (...names) => {
+  for (const n of names) if (process.env[n]) return process.env[n];
+  return undefined;
+};
+
+const NODE_URL =
+  env("NODE_URL", "NEXT_PUBLIC_NODE_URL") || "http://localhost:8080";
+const APP_NAME = env("APP_NAME", "NEXT_PUBLIC_APP_NAME") || "app";
+const CHAIN_ID = Number(env("CHAIN_ID", "NEXT_PUBLIC_CHAIN_ID") || "31337");
+const RPC_URL = env("RPC_URL", "NEXT_PUBLIC_RPC_URL");
 // Anvil account #0 — the default operator/admin address in core_settings.py.
 const OPERATOR_KEY =
   process.env.OPERATOR_KEY ||
   "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
 const INFO_BASE_URL = process.env.INFO_BASE_URL || "";
 
+// Resolve the base-layer chain from CHAIN_ID against viem's built-in chains,
+// falling back to a generic definition that uses RPC_URL (mirrors the
+// frontend's app/lib/chain.ts).
+const chain =
+  Object.values(chains).find((c) => c?.id === CHAIN_ID) ??
+  defineChain({
+    id: CHAIN_ID,
+    name: `Chain ${CHAIN_ID}`,
+    nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+    rpcUrls: { default: { http: RPC_URL ? [RPC_URL] : [] } },
+  });
+
 const model = JSON.parse(
   readFileSync(resolve(__dirname, "../market-models/demo.json"), "utf8"),
 );
 const bEth = process.env.B_PARAM || model.b;
 const depositEth = process.env.AMM_DEPOSIT || model.ammDeposit;
+
+// Echo the resolved config up front so connection failures are easy to
+// diagnose (e.g. NODE_URL silently falling back to localhost when .env did
+// not load).
+console.log(
+  `Env file   : ${envLoaded ? envFile : `${envFile} (not found — using process env / defaults)`}`,
+);
+console.log(`Node URL   : ${NODE_URL}`);
+console.log(`App name   : ${APP_NAME}`);
+console.log(`Chain      : ${chain.name} (id ${chain.id})`);
+console.log(`RPC URL    : ${RPC_URL || "(viem chain default)"}`);
 
 // --- Helpers --------------------------------------------------------------
 
@@ -76,26 +135,97 @@ const infoUrl = (alias) => `${INFO_BASE_URL}/api/info/${alias}`;
 // --- Client ---------------------------------------------------------------
 
 const account = privateKeyToAccount(OPERATOR_KEY);
-const wallet = createWalletClient({
+
+// A plain HTTP wallet client bound to the local operator key; signs and
+// broadcasts transactions itself (eth_sendRawTransaction).
+const signer = createWalletClient({
   account,
-  chain: anvil,
-  transport: http(process.env.L1_RPC),
+  chain,
+  transport: http(RPC_URL),
 }).extend(walletActionsL1());
 
-const resolveAddress = getAddress(process.env.RESOLVE_ADDRESS || account.address);
+// The generated backend-libs talk to the chain as if to a browser wallet: they
+// call eth_requestAccounts to discover the sender and pass it as a plain
+// address, so viem broadcasts via eth_sendTransaction (node-side signing). A
+// public HTTP RPC (Alchemy, etc.) supports neither and rejects them with
+// "JSON is not a valid request object" (anvil works only because its accounts
+// are unlocked). Wrap the transport so account discovery returns the operator
+// address and eth_sendTransaction is signed locally and re-sent as
+// eth_sendRawTransaction; everything else forwards to the real RPC.
+//
+// Nonces are assigned locally and incremented per send: the deposit step is
+// not awaited to a receipt, so the very next tx would otherwise read a stale
+// `pending` nonce from the RPC, reuse the deposit's nonce, and be rejected
+// ("Missing or invalid parameters" / -32602).
+const httpTransport = http(RPC_URL)({ chain });
+let nextNonce;
+const transport = custom({
+  async request(args) {
+    if (args.method === "eth_requestAccounts" || args.method === "eth_accounts")
+      return [account.address];
+    if (args.method === "eth_sendTransaction") {
+      const [tx = {}] = args.params ?? [];
+      if (nextNonce === undefined)
+        nextNonce = Number(
+          await httpTransport.request({
+            method: "eth_getTransactionCount",
+            params: [account.address, "pending"],
+          }),
+        );
+      const nonce = tx.nonce != null ? Number(tx.nonce) : nextNonce++;
+      return signer.sendTransaction({
+        account,
+        chain,
+        nonce,
+        to: tx.to ?? null,
+        data: tx.data ?? tx.input,
+        value: tx.value != null ? BigInt(tx.value) : undefined,
+        gas: tx.gas != null ? BigInt(tx.gas) : undefined,
+        gasPrice: tx.gasPrice != null ? BigInt(tx.gasPrice) : undefined,
+        maxFeePerGas:
+          tx.maxFeePerGas != null ? BigInt(tx.maxFeePerGas) : undefined,
+        maxPriorityFeePerGas:
+          tx.maxPriorityFeePerGas != null
+            ? BigInt(tx.maxPriorityFeePerGas)
+            : undefined,
+      });
+    }
+    return httpTransport.request(args);
+  },
+});
+
+const wallet = createWalletClient({
+  account,
+  chain,
+  transport,
+}).extend(walletActionsL1());
+
+const resolveAddress = getAddress(
+  process.env.RESOLVE_ADDRESS || account.address,
+);
 
 // --- Main -----------------------------------------------------------------
 
 async function main() {
-  const appAddress =
-    (process.env.APP_ADDRESS && getAddress(process.env.APP_ADDRESS)) ||
-    (await getAppAddress(APP_NAME, NODE_URL));
-  if (!appAddress) throw new Error(`Could not resolve app address for "${APP_NAME}"`);
+  let appAddress;
+  if (process.env.APP_ADDRESS) {
+    appAddress = getAddress(process.env.APP_ADDRESS);
+  } else {
+    try {
+      appAddress = await getAppAddress(APP_NAME, NODE_URL);
+    } catch (err) {
+      throw new Error(
+        `Could not reach the Cartesi node at ${NODE_URL} to resolve "${APP_NAME}" ` +
+          `(${err.shortMessage || err.message}). Check NODE_URL / your .env, or set APP_ADDRESS.`,
+      );
+    }
+  }
+  if (!appAddress)
+    throw new Error(`Could not resolve app address for "${APP_NAME}"`);
 
   const mutationOpts = { applicationAddress: appAddress, client: wallet };
 
   console.log(`Operator   : ${account.address}`);
-  console.log(`Node URL   : ${NODE_URL}`);
   console.log(`App address: ${appAddress}`);
   console.log(`b          : ${bEth} ETH\n`);
 
@@ -105,7 +235,7 @@ async function main() {
       application: appAddress,
       value: parseEther(String(depositEth)),
       account: account.address,
-      chain: anvil,
+      chain,
       execLayerData: "0x",
     });
     console.log(`  funded (tx ${hash})`);
