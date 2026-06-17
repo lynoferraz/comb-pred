@@ -810,7 +810,7 @@ function LiquidationCard({
             </span>
           )}
           <span
-            title="Liquidation value − your overall expected balance"
+            title="Liquidation value − your free funds balance on liquidation"
             className="font-mono text-xs font-semibold text-accent-deep"
           >
             {fmt.eth(free, 5)} ETH
