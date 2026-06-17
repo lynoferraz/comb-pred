@@ -158,7 +158,10 @@ export default function ReportPanel({
     return () => clearTimeout(id);
   }, [reportValue]);
 
-  const commitNow = useCallback(() => setQueryValue(reportValueRef.current), []);
+  const commitNow = useCallback(
+    () => setQueryValue(reportValueRef.current),
+    [],
+  );
 
   // ── Authoritative preview (value + user_address): real cost/expected ──────
   useEffect(() => {
@@ -189,7 +192,14 @@ export default function ReportPanel({
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [market.alias, currentStateIdx, queryValue, walletAddress, appAddress, evKey]);
+  }, [
+    market.alias,
+    currentStateIdx,
+    queryValue,
+    walletAddress,
+    appAddress,
+    evKey,
+  ]);
 
   // The preview is debounced, so for ~1.2s after a change it still describes
   // the OLD report value. Only trust it while it matches the current
@@ -454,8 +464,8 @@ export default function ReportPanel({
             </div>
             {bounds && targetP > hiBound && (
               <div className="mt-2 text-[11px] text-no font-mono">
-                Beyond your reachable max P({stateName}) = {hiBound.toFixed(4)} —
-                reduce the amount or it'll be rejected at submit.
+                Beyond your reachable max P({stateName}) = {hiBound.toFixed(4)}{" "}
+                — reduce the amount or it'll be rejected at submit.
               </div>
             )}
           </div>
@@ -473,7 +483,7 @@ export default function ReportPanel({
                     : "text-accent-deep"
                 }`}
               >
-                Expected funds if{" "}
+                Funds if{" "}
                 {isBinary ? (side === "yes" ? "Yes" : "No") : `"${stateName}"`}{" "}
                 wins
                 {isConditional && (
@@ -498,7 +508,9 @@ export default function ReportPanel({
               <span className="text-ink2">Δ vs expected</span>
               <span
                 className={`font-mono font-semibold whitespace-nowrap ${
-                  (expectedDelta ?? 0) >= 0 ? "text-accent-deep" : "text-no-deep"
+                  (expectedDelta ?? 0) >= 0
+                    ? "text-accent-deep"
+                    : "text-no-deep"
                 } ${previewLoading ? "loading-value" : ""}`}
               >
                 {expectedDelta !== undefined
@@ -614,11 +626,13 @@ export default function ReportPanel({
               ],
               [
                 costEth > 0 ? "Revenue now" : "Cost now",
-                (costEth > 0 ? "+" : "") + fmt.eth(Math.abs(costEth), 5) + " ETH",
+                (costEth > 0 ? "+" : "") +
+                  fmt.eth(Math.abs(costEth), 5) +
+                  " ETH",
                 costEth > 0 ? "text-accent" : "text-ink",
               ],
               [
-                "Expected if right",
+                "Funds if right",
                 expectedFundsEth !== undefined
                   ? fmt.eth(expectedFundsEth, 5) + " ETH"
                   : "—",
@@ -787,7 +801,7 @@ function LiquidationCard({
         <div className="flex items-baseline gap-2">
           {delta !== undefined && (
             <span
-              title="Liquidation value − your overall expected balance"
+              title="Gain/loss vs expected funds"
               className={`font-mono text-[11px] font-semibold ${
                 delta >= 0 ? "text-accent" : "text-no"
               }`}
@@ -795,7 +809,10 @@ function LiquidationCard({
               {fmt.signed(delta, 5)} <span className="text-ink3">vs exp.</span>
             </span>
           )}
-          <span className="font-mono text-xs font-semibold text-accent-deep">
+          <span
+            title="Liquidation value − your overall expected balance"
+            className="font-mono text-xs font-semibold text-accent-deep"
+          >
             {fmt.eth(free, 5)} ETH
           </span>
         </div>
@@ -827,7 +844,7 @@ function LiquidationCard({
         {onOpenExplorer && (
           <button
             onClick={onOpenExplorer}
-            className="flex-1 bg-ink text-accent text-[12px] font-semibold py-2 rounded-lg hover:opacity-90 transition-opacity"
+            className="flex-1 bg-line2 border border-line text-ink text-[12px] font-semibold py-2 rounded-lg hover:bg-line transition-colors"
           >
             Open in Explorer →
           </button>

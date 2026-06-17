@@ -61,6 +61,8 @@ export default function ExplorerPage() {
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<QueryResult | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
+  const [marginPct, setMarginPct] = useState(5);
+  const [showAdv, setShowAdv] = useState(false);
 
   // ── Handoff from another screen (Detail report panel or Dashboard) ─────────
   // sessionStorage payload is consumed once.
@@ -130,7 +132,14 @@ export default function ExplorerPage() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tKey, evKey, queryReportValue, walletAddress, appAddress, validQueryValue]);
+  }, [
+    tKey,
+    evKey,
+    queryReportValue,
+    walletAddress,
+    appAddress,
+    validQueryValue,
+  ]);
 
   const bounds = preview?.user_edit_bounds as [number, number] | undefined;
   const costEth =
@@ -181,9 +190,9 @@ export default function ExplorerPage() {
     }
     setSubmitting(true);
     try {
-      // Use the live preview's cost for the fund threshold (5% safety margin).
+      // Use the live preview's cost for the fund threshold (safety margin).
       const c = costEth ?? 0;
-      const threshold = c - Math.abs(c) * 0.05;
+      const threshold = c - Math.abs(c) * (marginPct / 100);
 
       const payload = {
         value: toHex(Math.round(reportValue * 1e6)),
@@ -397,7 +406,7 @@ export default function ExplorerPage() {
                       </span>
                     </div>
                     <div className="flex justify-between text-xs">
-                      <span className="text-ink2">Expected if right</span>
+                      <span className="text-ink2">Funds if right</span>
                       <span
                         className={`font-mono font-semibold text-ink ${previewLoading ? "loading-value" : ""}`}
                       >
@@ -419,6 +428,49 @@ export default function ExplorerPage() {
                       </span>
                     </div>
                   </div>
+                )}
+
+                {walletAddress && (
+                  <>
+                    <button
+                      onClick={() => setShowAdv((v) => !v)}
+                      className="text-ink3 text-[11px] font-medium flex items-center gap-1 self-start"
+                    >
+                      {showAdv ? "▾" : "▸"} Fund threshold & safety margin
+                    </button>
+                    {showAdv && (
+                      <div className="p-3.5 border border-line rounded-[14px] flex flex-col gap-2.5">
+                        <div className="flex justify-between text-xs gap-2">
+                          <span className="text-ink2">
+                            Auto-revert if cost exceeds
+                          </span>
+                          <span
+                            className={`font-mono font-semibold text-ink whitespace-nowrap ${previewLoading ? "loading-value" : ""}`}
+                          >
+                            {fmt.eth(
+                              Math.abs(costEth ?? 0) * (1 + marginPct / 100),
+                              5,
+                            )}{" "}
+                            ETH
+                          </span>
+                        </div>
+                        <div>
+                          <div className="flex justify-between text-[11px] text-ink3 mb-1">
+                            <span>Margin</span>
+                            <span className="font-mono">{marginPct}%</span>
+                          </div>
+                          <input
+                            type="range"
+                            min={0}
+                            max={20}
+                            value={marginPct}
+                            onChange={(e) => setMarginPct(+e.target.value)}
+                            className="w-full accent-[var(--color-accent)]"
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </>
                 )}
 
                 {error && (

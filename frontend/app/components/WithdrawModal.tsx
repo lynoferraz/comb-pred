@@ -6,7 +6,7 @@ import { parseEther } from "viem";
 import { useApp } from "../lib/context";
 import { useToast } from "./ui/Toast";
 import Modal from "./ui/Modal";
-import { withdrawEther } from "../backend-libs/wallet/lib";
+import { withdrawEther } from "../backend-libs/cim/lib";
 import { fmt } from "../lib/format";
 
 export default function WithdrawModal({ onClose }: { onClose: () => void }) {

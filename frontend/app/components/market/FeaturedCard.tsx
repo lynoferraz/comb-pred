@@ -49,6 +49,16 @@ export default function FeaturedCard({ m }: { m: Market }) {
   const trackColor =
     "color-mix(in srgb, var(--color-surface) 18%, transparent)";
 
+  let stateIndex = 0;
+  for (let i = 1; i < m.states.length; i++) {
+    if (
+      m.states[i] &&
+      m.states[stateIndex] &&
+      m.states[i].prob > m.states[stateIndex].prob
+    ) {
+      stateIndex = i;
+    }
+  }
   return (
     <Link
       href={`/variable/${encodeURIComponent(m.alias)}`}
@@ -114,7 +124,7 @@ export default function FeaturedCard({ m }: { m: Market }) {
 
         <div className="relative flex flex-col items-center gap-3">
           <Donut
-            p={m.states[0]?.prob ?? 0}
+            p={m.states[stateIndex]?.prob ?? 0}
             size={150}
             strokeW={13}
             color="var(--color-accent)"
@@ -123,7 +133,7 @@ export default function FeaturedCard({ m }: { m: Market }) {
             subTextColor="color-mix(in srgb, var(--color-surface) 60%, transparent)"
           />
           <div className="text-xs text-ink3 font-mono">
-            {m.states.length === 2 ? "P(Yes)" : m.states[0]?.name}
+            {m.states.length === 2 ? "P(Yes)" : m.states[stateIndex]?.name}
           </div>
           {trend.length > 1 && (
             <div className="flex flex-col items-center gap-1">

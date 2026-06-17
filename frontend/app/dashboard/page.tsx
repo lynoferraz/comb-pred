@@ -46,7 +46,8 @@ export default function DashboardPage() {
   // Position/liquidation values come from on-demand ammQuery; this map is only
   // for variable/state names, so build it from info without a probability load.
   const allMarkets = useMemo(
-    () => buildMarketsFromAliases(aliases, marketData, infoMap, graphNodes, ammB),
+    () =>
+      buildMarketsFromAliases(aliases, marketData, infoMap, graphNodes, ammB),
     [aliases, marketData, infoMap, graphNodes, ammB],
   );
 
@@ -137,11 +138,10 @@ export default function DashboardPage() {
           for (const a of [
             ...(d.var_aliases ?? []),
             ...(d.evidence_aliases ?? []),
-          ])
-            {
-              const alias = bytes32ToAlias(a);
-              if (alias) edited.add(alias);
-            }
+          ]) {
+            const alias = bytes32ToAlias(a);
+            if (alias) edited.add(alias);
+          }
         }
         if (res.data.length < pageSize || page * pageSize >= res.total) break;
         page++;
@@ -150,9 +150,7 @@ export default function DashboardPage() {
       // 2. Keep only still-unresolved variables (resolves drop out of the JT),
       //    then the cliques that contain at least one of them.
       const live = new Set(graphNodes.flat());
-      const relevant = new Set(
-        [...edited].filter((a) => live.has(a)),
-      );
+      const relevant = new Set([...edited].filter((a) => live.has(a)));
       const cliques =
         relevant.size === 0
           ? []
@@ -188,12 +186,14 @@ export default function DashboardPage() {
       );
       // Dedup cliques that pruned to the same variable set.
       const seen = new Set<string>();
-      const unique = (results.filter(Boolean) as PositionTable[]).filter((p) => {
-        const k = [...p.vars].sort().join(",");
-        if (seen.has(k)) return false;
-        seen.add(k);
-        return true;
-      });
+      const unique = (results.filter(Boolean) as PositionTable[]).filter(
+        (p) => {
+          const k = [...p.vars].sort().join(",");
+          if (seen.has(k)) return false;
+          seen.add(k);
+          return true;
+        },
+      );
       setPositions(unique);
     } finally {
       setPositionsLoading(false);
@@ -331,7 +331,10 @@ export default function DashboardPage() {
 
         <div className="h-[220px]">
           {balanceData.length > 0 ? (
-            <BalanceChart data={balanceData} valueFormatter={(v) => v.toFixed(3)} />
+            <BalanceChart
+              data={balanceData}
+              valueFormatter={(v) => v.toFixed(3)}
+            />
           ) : (
             <div className="h-full grid place-items-center text-ink3 text-xs">
               {loading ? "Loading balance history…" : "No balance history yet"}
@@ -356,10 +359,7 @@ export default function DashboardPage() {
             ["Today", `${fmt.signed(pnl24h, 4)} ETH`, "Expected Δ 24h"],
             ["Balance events", String(history.length), "Recorded"],
           ].map(([k, v, sub], i) => (
-            <div
-              key={k}
-              className={i ? "pl-6 border-l border-line" : ""}
-            >
+            <div key={k} className={i ? "pl-6 border-l border-line" : ""}>
               <div className="text-xs text-ink3 font-medium">{k}</div>
               <div className="mt-1.5 text-xl font-semibold font-mono tracking-tight">
                 {v}
@@ -410,7 +410,9 @@ export default function DashboardPage() {
         <div className="bg-surface rounded-card border border-line p-[22px] flex flex-col gap-3">
           <div className="flex justify-between items-center">
             <div>
-              <div className="text-sm font-semibold">Liquidation simulation</div>
+              <div className="text-sm font-semibold">
+                Liquidation simulation
+              </div>
               <div className="text-[11px] text-ink3 mt-0.5">
                 Pick rows from the tables above; each row goes in as a target or
                 as evidence.
@@ -434,7 +436,8 @@ export default function DashboardPage() {
                   key={`t-${i}`}
                   className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-accent-soft border border-accent text-accent-deep text-[11px] font-medium"
                 >
-                  T · {m?.short || t.alias} = {m?.states[t.stateIdx]?.name ?? t.stateIdx}
+                  T · {m?.short || t.alias} ={" "}
+                  {m?.states[t.stateIdx]?.name ?? t.stateIdx}
                 </span>
               );
             })}
@@ -445,7 +448,8 @@ export default function DashboardPage() {
                   key={`e-${i}`}
                   className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-line2 border border-ink4 text-ink text-[11px] font-medium"
                 >
-                  E · {m?.short || e.alias} = {m?.states[e.stateIdx]?.name ?? e.stateIdx}
+                  E · {m?.short || e.alias} ={" "}
+                  {m?.states[e.stateIdx]?.name ?? e.stateIdx}
                 </span>
               );
             })}
@@ -465,7 +469,8 @@ export default function DashboardPage() {
                   targets: liqTargets,
                   evidence: liqEvidence,
                   value:
-                    typeof liqResult.user_liquidation!.report?.value === "number"
+                    typeof liqResult.user_liquidation!.report?.value ===
+                    "number"
                       ? liqResult.user_liquidation!.report.value
                       : undefined,
                 });
@@ -485,8 +490,8 @@ export default function DashboardPage() {
       <div className="bg-surface rounded-card border border-line p-[22px] flex gap-3 items-start">
         <Info size={18} className="text-ink3 shrink-0 mt-0.5" />
         <div className="text-[13px] text-ink2 leading-relaxed">
-          <span className="font-semibold text-ink">About positions.</span> In CIM
-          a forecast is a report over a joint assignment of variables, not a
+          <span className="font-semibold text-ink">About positions.</span> In
+          CIM a forecast is a report over a joint assignment of variables, not a
           single-market share. The tables above show your expected value across
           every joint assignment of each junction-tree clique. Select a row as a
           target or evidence to run a liquidation query, then forward the result
@@ -504,7 +509,9 @@ export default function DashboardPage() {
             <table className="w-full text-[13px] border-collapse">
               <thead>
                 <tr className="text-ink3 text-[11px]">
-                  <th className="px-[22px] py-2.5 text-left font-medium">Time</th>
+                  <th className="px-[22px] py-2.5 text-left font-medium">
+                    Time
+                  </th>
                   <th className="px-[22px] py-2.5 text-right font-medium">
                     Free funds
                   </th>
@@ -610,7 +617,7 @@ function PositionTable({
                 </th>
               ))}
               <th className="text-right font-medium pr-4 py-2 whitespace-nowrap">
-                Expected (ETH)
+                Funds if right (ETH)
               </th>
               {baselineExpected !== undefined && (
                 <th
@@ -679,8 +686,9 @@ function PositionTable({
         </table>
       </div>
       <div className="mt-3 text-[10px] text-ink3 font-mono">
-        Click a cell to toggle: off → <span className="text-accent-deep">target</span>{" "}
-        → <span className="text-ink">evidence</span> → off.
+        Click a cell to toggle: off →{" "}
+        <span className="text-accent-deep">target</span> →{" "}
+        <span className="text-ink">evidence</span> → off.
       </div>
     </div>
   );
